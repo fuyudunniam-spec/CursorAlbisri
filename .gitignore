@@ -32,6 +32,7 @@ dist-ssr
 *.sql
 
 # Environment files with sensitive data
+# Note: .env.example is NOT ignored as it's a template
 .env
 .env.local
 .env.*.local

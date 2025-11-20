@@ -264,19 +264,115 @@ Baca dokumentasi lengkap untuk setiap modul:
 
 ## 🚢 Deployment
 
-### Via Lovable (Recommended)
+### Via Vercel (Recommended)
+
+#### Prerequisites
+- GitHub/GitLab/Bitbucket repository
+- Vercel account (free tier available)
+- Supabase project URL and Anon Key
+
+#### Quick Deploy
+
+1. **Connect Repository to Vercel**
+   - Visit [vercel.com](https://vercel.com)
+   - Click "New Project"
+   - Import your Git repository
+   - Vercel will auto-detect Vite configuration
+
+2. **Configure Environment Variables**
+   
+   In Vercel Dashboard → Project Settings → Environment Variables, add:
+   
+   ```
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-anon-key-here
+   ```
+   
+   Apply to: **Production**, **Preview**, and **Development**
+
+3. **Deploy**
+   - Click "Deploy"
+   - Vercel will build and deploy automatically
+   - Your app will be live at `https://your-project.vercel.app`
+
+#### Build Configuration
+
+The project includes `vercel.json` with optimized settings:
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- SPA Routing: Configured for client-side routing
+
+#### Environment Variables Setup
+
+**Required Variables:**
+- `VITE_SUPABASE_URL` - Your Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous/public key
+
+**How to get these values:**
+1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+2. Select your project
+3. Go to Settings → API
+4. Copy "Project URL" and "anon/public" key
+
+#### Troubleshooting Deployment
+
+**Issue: 404 on page refresh**
+- ✅ Solution: `vercel.json` is configured with SPA rewrites
+- Verify the file exists in your repository root
+
+**Issue: Environment variables not working**
+- Check variable names use `VITE_` prefix
+- Verify variables are set in Vercel dashboard
+- Redeploy after adding variables
+
+**Issue: Build fails**
+- Check build logs in Vercel dashboard
+- Verify `npm run build` works locally
+- Ensure all dependencies are in `package.json`
+
+**Issue: Supabase connection errors**
+- Verify environment variables are correct
+- Check Supabase project is active
+- Ensure CORS is configured in Supabase (usually auto-configured)
+
+**Issue: TypeScript errors during build**
+- Run `npm run build` locally to see errors
+- Fix type errors before deploying
+- Check `tsconfig.json` configuration
+
+#### Continuous Deployment
+
+Once connected, Vercel automatically:
+- Deploys on every push to main branch
+- Creates preview deployments for pull requests
+- Runs build checks before deployment
+
+#### Custom Domain
+
+1. Go to Vercel Dashboard → Project Settings → Domains
+2. Add your custom domain
+3. Configure DNS records as instructed
+4. SSL certificate is automatically provisioned
+
+For detailed deployment guide, see [DEPLOYMENT.md](./DEPLOYMENT.md)
+
+### Via Lovable
 
 1. Visit [Lovable Project](https://lovable.dev/projects/9d860f02-6d80-43a3-b792-aef268da3f22)
 2. Click Share → Publish
 3. Domain: Custom domain available
 
-### Via Vercel/Netlify
+### Via Netlify
 
 ```bash
 # Build production
 npm run build
 
 # Deploy dist/ folder
+# Configure build settings:
+# - Build command: npm run build
+# - Publish directory: dist
+# - Add environment variables in Netlify dashboard
 ```
 
 ---
