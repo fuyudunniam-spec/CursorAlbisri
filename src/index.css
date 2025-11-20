@@ -1,6 +1,28 @@
+/* Import print styles */
+@import './styles/print.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Fix for ARIA accessibility issues with Dialog components */
+@layer base {
+  /* Ensure dialog content is never aria-hidden when it has focus */
+  [data-radix-dialog-content][aria-hidden="true"]:has(:focus) {
+    aria-hidden: false !important;
+  }
+  
+  /* Remove aria-hidden from any focused element or its ancestors */
+  [aria-hidden="true"]:has(:focus),
+  [aria-hidden="true"]:has(:focus-within) {
+    aria-hidden: false !important;
+  }
+  
+  /* Ensure dialog content is accessible when open */
+  [data-radix-dialog-content][data-state="open"] {
+    aria-hidden: false !important;
+  }
+}
 
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.

@@ -23,28 +23,16 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { DocumentService, DocumentRequirement, DocumentFile } from '@/services/document.service';
 
-interface DocumentRequirement {
+// Use types from DocumentService
+type LocalDocumentRequirement = {
   kode: string;
   nama: string;
   kategori: 'wajib' | 'kondisional' | 'opsional';
   kondisi?: string;
   format: string;
-}
-
-interface DocumentFile {
-  id?: string;
-  kode_dokumen: string;
-  url?: string;
-  mime?: string;
-  size?: number;
-  original_name?: string;
-  status_validasi: 'Valid' | 'Perlu Perbaikan' | 'Tidak Valid';
-  verifier?: string;
-  tanggal_upload?: string;
-  catatan?: string;
-  is_active: boolean;
-}
+};
 
 interface UploadDokumenSantriProps {
   santriId: string;
@@ -64,133 +52,57 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
   const [previewFile, setPreviewFile] = useState<DocumentFile | null>(null);
   const [verificationDialog, setVerificationDialog] = useState<DocumentFile | null>(null);
   const [verificationNote, setVerificationNote] = useState('');
-  const [verificationStatus, setVerificationStatus] = useState<'Valid' | 'Perlu Perbaikan' | 'Tidak Valid'>('Valid');
+  const [verificationStatus, setVerificationStatus] = useState<'Diverifikasi' | 'Belum Diverifikasi' | 'Ditolak'>('Diverifikasi');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Definisi dokumen berdasarkan kategori
-  const getDocumentRequirements = (): DocumentRequirement[] => {
-    const baseDocuments: DocumentRequirement[] = [
-      { kode: 'PAS_FOTO', nama: 'Pas Foto', kategori: 'wajib', format: 'JPG/PNG' },
-      { kode: 'AKTA_LAHIR', nama: 'Akta Kelahiran', kategori: 'wajib', format: 'PDF/JPG' },
-      { kode: 'KARTU_KELUARGA', nama: 'Kartu Keluarga', kategori: 'wajib', format: 'PDF/JPG' }
-    ];
+  // Get document requirements from database
+  const [requirements, setRequirements] = useState<DocumentRequirement[]>([]);
 
-    const conditionalDocuments: DocumentRequirement[] = [
-      { 
-        kode: 'AKTA_KEMATIAN_AYAH', 
-        nama: 'Akta Kematian Ayah', 
-        kategori: 'kondisional', 
-        kondisi: 'yatim',
-        format: 'PDF/JPG' 
-      },
-      { 
-        kode: 'AKTA_KEMATIAN_IBU', 
-        nama: 'Akta Kematian Ibu', 
-        kategori: 'kondisional', 
-        kondisi: 'piatu',
-        format: 'PDF/JPG' 
+  useEffect(() => {
+    const loadRequirements = async () => {
+      try {
+        const reqs = await DocumentService.getDocumentRequirements(
+          kategori,
+          statusAnak,
+          false // Not bantuan recipient for basic form
+        );
+        setRequirements(reqs);
+      } catch (error) {
+        console.error('Error loading requirements:', error);
       }
-    ];
+    };
 
-    const optionalDocuments: DocumentRequirement[] = [
-      { kode: 'SKTM', nama: 'Surat Keterangan Tidak Mampu', kategori: 'opsional', format: 'PDF/JPG' },
-      { kode: 'IJAZAH', nama: 'Ijazah Terakhir', kategori: 'opsional', format: 'PDF/JPG' },
-      { kode: 'TRANSKRIP', nama: 'Transkrip Nilai', kategori: 'opsional', format: 'PDF/JPG' }
-    ];
+    loadRequirements();
+  }, [kategori, statusAnak]);
 
-    let requiredDocuments = [...baseDocuments];
-
-    // Aturan berdasarkan kategori
-    switch (kategori) {
-      case 'Reguler':
-        // Reguler: Pas Foto + (Akta Lahir ATAU KK)
-        requiredDocuments = [
-          { kode: 'PAS_FOTO', nama: 'Pas Foto', kategori: 'wajib', format: 'JPG/PNG' },
-          { kode: 'AKTA_LAHIR_ATAU_KK', nama: 'Akta Lahir atau KK', kategori: 'wajib', format: 'PDF/JPG' }
-        ];
-        break;
-
-      case 'Binaan Mukim':
-        // Binaan Mukim: dokumen lengkap
-        requiredDocuments = [
-          { kode: 'PAS_FOTO', nama: 'Pas Foto', kategori: 'wajib', format: 'JPG/PNG' },
-          { kode: 'AKTA_LAHIR', nama: 'Akta Kelahiran', kategori: 'wajib', format: 'PDF/JPG' },
-          { kode: 'KARTU_KELUARGA', nama: 'Kartu Keluarga', kategori: 'wajib', format: 'PDF/JPG' },
-          { kode: 'KTP_ORTU', nama: 'KTP Orang Tua/Wali Utama', kategori: 'wajib', format: 'PDF/JPG' },
-          { kode: 'KTP_WALI_PENDA', nama: 'KTP Wali Pendamping', kategori: 'wajib', format: 'PDF/JPG' },
-          { kode: 'SURAT_SEHAT', nama: 'Surat Keterangan Sehat', kategori: 'wajib', format: 'PDF/JPG' }
-        ];
-        break;
-
-      case 'Binaan Non-Mukim':
-        // Binaan Non-Mukim: dokumen dasar + KTP ortu
-        requiredDocuments = [
-          { kode: 'PAS_FOTO', nama: 'Pas Foto', kategori: 'wajib', format: 'JPG/PNG' },
-          { kode: 'AKTA_LAHIR', nama: 'Akta Kelahiran', kategori: 'wajib', format: 'PDF/JPG' },
-          { kode: 'KARTU_KELUARGA', nama: 'Kartu Keluarga', kategori: 'wajib', format: 'PDF/JPG' },
-          { kode: 'KTP_ORTU', nama: 'KTP Orang Tua/Wali Utama', kategori: 'wajib', format: 'PDF/JPG' }
-        ];
-        break;
-    }
-
-    // Tambahkan dokumen kondisional berdasarkan status anak
-    if (statusAnak && ['Yatim', 'Piatu', 'Yatim Piatu'].includes(statusAnak)) {
-      if (statusAnak === 'Yatim' || statusAnak === 'Yatim Piatu') {
-        requiredDocuments.push(conditionalDocuments[0]); // Akta Kematian Ayah
-      }
-      if (statusAnak === 'Piatu' || statusAnak === 'Yatim Piatu') {
-        requiredDocuments.push(conditionalDocuments[1]); // Akta Kematian Ibu
-      }
-    }
-
-    // SKTM wajib untuk Dhuafa
-    if (statusAnak === 'Dhuafa') {
-      requiredDocuments.push({ kode: 'SKTM', nama: 'Surat Keterangan Tidak Mampu', kategori: 'wajib', format: 'PDF/JPG' });
-    }
-
-    // Tambahkan dokumen opsional untuk semua kategori (kecuali SKTM jika sudah wajib)
-    const filteredOptionalDocs = optionalDocuments.filter(doc => 
-      !(doc.kode === 'SKTM' && statusAnak === 'Dhuafa')
-    );
-    
-    return [...requiredDocuments, ...filteredOptionalDocs];
+  // Convert database requirements to local format
+  const getDocumentRequirements = (): LocalDocumentRequirement[] => {
+    return requirements
+      .filter(req => req.kategori_dokumen === 'Reguler')
+      .map(req => ({
+        kode: req.jenis_dokumen,
+        nama: req.jenis_dokumen,
+        kategori: req.is_required ? 'wajib' : 'opsional',
+        kondisi: req.kondisi_required,
+        format: 'PDF/JPG'
+      }));
   };
 
   // Load dokumen yang sudah ada
   const loadDocuments = async () => {
+    // Don't load if santriId is not provided (e.g., new santri form)
+    if (!santriId || santriId === 'undefined') {
+      console.log('Skipping document load: no santriId provided');
+      setDocuments([]);
+      return;
+    }
+
     try {
       console.log('Loading documents for santri:', santriId);
-      const { data, error } = await supabase
-        .from('dokumen_santri')
-        .select('*')
-        .eq('santri_id', santriId)
-        .eq('is_active', true)
-        .order('tanggal_upload', { ascending: false });
-
-      console.log('Documents loaded:', { data, error });
-
-      if (error) {
-        console.error('Database error:', error);
-        throw error;
-      }
-
+      const docs = await DocumentService.getSantriDocuments(santriId);
+      
       // Fix URLs for documents with old path format
-      const fixedDocuments = (data || []).map(doc => fixDocumentUrl(doc));
-      
-      // Update database with fixed URLs if needed
-      const documentsToUpdate = fixedDocuments.filter(doc => 
-        doc.url && doc.url !== data?.find(original => original.id === doc.id)?.url
-      );
-      
-      if (documentsToUpdate.length > 0) {
-        console.log('Updating', documentsToUpdate.length, 'documents with fixed URLs');
-        for (const doc of documentsToUpdate) {
-          await supabase
-            .from('dokumen_santri')
-            .update({ url: doc.url })
-            .eq('id', doc.id);
-        }
-      }
+      const fixedDocuments = docs.map(doc => fixDocumentUrl(doc));
       
       setDocuments(fixedDocuments);
       console.log('Documents state updated:', fixedDocuments.length, 'documents');
@@ -224,48 +136,10 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
 
       console.log('Uploading to path:', filePath);
 
-      // Upload ke Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('santri-documents')
-        .upload(filePath, file);
-
-      console.log('Upload result:', { uploadData, uploadError });
-
-      if (uploadError) {
-        console.error('Upload error details:', uploadError);
-        throw new Error(`Upload gagal: ${uploadError.message}`);
-      }
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('santri-documents')
-        .getPublicUrl(filePath);
-
-      console.log('Public URL:', urlData.publicUrl);
-
-      // Simpan metadata ke database
-      const { error: dbError } = await supabase
-        .from('dokumen_santri')
-        .insert({
-          santri_id: santriId,
-          kode_dokumen: kodeDokumen,
-          url: urlData.publicUrl,
-          mime: file.type,
-          size: file.size,
-          original_name: file.name,
-          status_validasi: 'Perlu Perbaikan',
-          tanggal_upload: new Date().toISOString(),
-          is_active: true
-        });
-
-      console.log('Database insert result:', { dbError });
-
-      if (dbError) {
-        console.error('Database error details:', dbError);
-        throw new Error(`Database error: ${dbError.message}`);
-      }
-
-      console.log('Upload completed successfully');
+      // Use DocumentService for upload
+      const uploadedDoc = await DocumentService.uploadDocument(santriId, kodeDokumen, file);
+      
+      console.log('Document uploaded successfully:', uploadedDoc);
       toast.success('Dokumen berhasil diupload');
       loadDocuments();
       // Call callback to refresh parent component
@@ -286,36 +160,41 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
       const { error } = await supabase
         .from('dokumen_santri')
         .update({
-          status_validasi: verificationStatus,
-          verifier: (await supabase.auth.getUser()).data.user?.id,
-          catatan: verificationNote,
+          status_verifikasi: verificationStatus,
+          verifikasi_oleh: (await supabase.auth.getUser()).data.user?.id,
+          catatan_verifikasi: verificationNote,
           updated_at: new Date().toISOString()
         })
         .eq('id', docId);
 
       if (error) throw error;
 
-      // Log audit
-      const oldDoc = documents.find(d => d.id === docId);
-      await supabase
-        .from('dokumen_audit_log')
-        .insert({
-          dokumen_id: docId,
-          action: 'verification',
-          performed_by: (await supabase.auth.getUser()).data.user?.id,
-          performed_at: new Date().toISOString(),
-          old_values: oldDoc ? { status_validasi: oldDoc.status_validasi } : null,
-          new_values: { 
-            status_validasi: verificationStatus,
-            catatan: verificationNote 
-          }
-        });
+      // Log audit (optional - table may not exist yet)
+      try {
+        const oldDoc = documents.find(d => d.id === docId);
+        await supabase
+          .from('dokumen_audit_log')
+          .insert({
+            dokumen_id: docId,
+            action: 'verification',
+            performed_by: (await supabase.auth.getUser()).data.user?.id,
+            performed_at: new Date().toISOString(),
+            old_values: oldDoc ? { status_verifikasi: oldDoc.status_verifikasi } : null,
+            new_values: { 
+              status_verifikasi: verificationStatus,
+              catatan_verifikasi: verificationNote 
+            }
+          });
+      } catch (auditError) {
+        // Audit log is optional, don't fail if table doesn't exist
+        console.log('Audit log skipped (table may not exist):', auditError);
+      }
 
       toast.success('Dokumen berhasil diverifikasi');
       loadDocuments();
       setVerificationDialog(null);
       setVerificationNote('');
-      setVerificationStatus('Valid');
+      setVerificationStatus('Diverifikasi');
 
     } catch (error) {
       console.error('Error verifying document:', error);
@@ -328,7 +207,7 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
     try {
       const { error } = await supabase
         .from('dokumen_santri')
-        .update({ is_active: false })
+        .delete()
         .eq('id', docId);
 
       if (error) throw error;
@@ -346,9 +225,9 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
   const calculateCompleteness = () => {
     const requirements = getDocumentRequirements();
     const requiredDocs = requirements.filter(doc => doc.kategori === 'wajib' || doc.kategori === 'kondisional');
-    const uploadedDocs = documents.filter(doc => doc.status_validasi === 'Valid');
+    const uploadedDocs = documents.filter(doc => doc.status_verifikasi === 'Diverifikasi');
     
-    const uploadedCodes = new Set(uploadedDocs.map(doc => doc.kode_dokumen));
+    const uploadedCodes = new Set(uploadedDocs.map(doc => doc.jenis_dokumen));
     const completedCount = requiredDocs.filter(doc => uploadedCodes.has(doc.kode)).length;
     
     return {
@@ -361,11 +240,11 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
   // Get status icon
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'Valid':
+      case 'Diverifikasi':
         return <CheckCircle className="w-5 h-5 text-green-500" />;
-      case 'Perlu Perbaikan':
+      case 'Belum Diverifikasi':
         return <AlertCircle className="w-5 h-5 text-yellow-500" />;
-      case 'Tidak Valid':
+      case 'Ditolak':
         return <XCircle className="w-5 h-5 text-red-500" />;
       default:
         return <FileText className="w-5 h-5 text-gray-400" />;
@@ -375,57 +254,35 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
   // Get status badge
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'Valid':
+      case 'Diverifikasi':
         return 'bg-green-100 text-green-800';
-      case 'Perlu Perbaikan':
+      case 'Belum Diverifikasi':
         return 'bg-yellow-100 text-yellow-800';
-      case 'Tidak Valid':
+      case 'Ditolak':
         return 'bg-red-100 text-red-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
-  // Fix URL for documents with old path format
+  // Generate public URL from path_file
   const fixDocumentUrl = (doc: DocumentFile): DocumentFile => {
-    if (!doc.url) return doc;
+    if (!doc.path_file) return doc;
     
     try {
-      // Parse the URL to get the file path
-      const url = new URL(doc.url);
-      const pathParts = url.pathname.split('/');
-      
-      // Find the index of 'santri-documents' in the path
-      const bucketIndex = pathParts.indexOf('santri-documents');
-      if (bucketIndex === -1 || bucketIndex >= pathParts.length - 1) {
-        console.log('Invalid URL format:', doc.url);
-        return doc;
-      }
-      
-      // Get the file path after the bucket name
-      let filePath = pathParts.slice(bucketIndex + 1).join('/');
-      
-      // If the path starts with 'documents/santri/', remove 'documents/' prefix
-      // This handles the mismatch between URL path and actual storage path
-      if (filePath.startsWith('documents/santri/')) {
-        filePath = filePath.replace('documents/', '');
-        console.log('Fixed file path:', filePath);
-      }
-      
-      // Generate new URL with the correct path
+      // Generate public URL using path_file
       const { data: urlData } = supabase.storage
         .from('santri-documents')
-        .getPublicUrl(filePath);
+        .getPublicUrl(doc.path_file);
       
-      console.log('Fixed URL:', { 
-        original: doc.url, 
-        filePath: filePath,
-        new: urlData.publicUrl 
+      console.log('Generated URL:', { 
+        path_file: doc.path_file,
+        url: urlData.publicUrl 
       });
       
       return { ...doc, url: urlData.publicUrl };
     } catch (error) {
-      console.error('Error fixing URL:', error, doc.url);
+      console.error('Error generating URL:', error, doc.path_file);
       return doc;
     }
   };
@@ -433,8 +290,8 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
   // Preview file
   const previewDocument = (doc: DocumentFile) => {
     console.log('Preview document:', doc);
-    console.log('Document URL:', doc.url);
     const fixedDoc = fixDocumentUrl(doc);
+    console.log('Fixed document URL:', fixedDoc.url);
     setPreviewFile(fixedDoc);
   };
 
@@ -445,7 +302,8 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
     }
   }, [santriId, kategori, statusAnak]);
 
-  const requirements = getDocumentRequirements();
+  // Get local requirements format
+  const localRequirements = getDocumentRequirements();
   const completeness = calculateCompleteness();
 
   return (
@@ -479,15 +337,15 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
           
           <Progress value={completeness.percentage} className="w-full" />
           <div className="text-sm text-gray-600 mt-2">
-            Status Anak: <Badge variant="secondary">{statusAnak || 'Belum ditentukan'}</Badge>
+            Status Sosial: <Badge variant="secondary">{statusAnak || 'Lengkap'}</Badge>
           </div>
         </CardContent>
       </Card>
 
       {/* Daftar Dokumen */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {requirements.map((req) => {
-          const uploadedDoc = documents.find(doc => doc.kode_dokumen === req.kode);
+        {localRequirements.map((req) => {
+          const uploadedDoc = documents.find(doc => doc.jenis_dokumen === req.kode);
           const isUploading = uploadingFiles[req.kode];
 
           return (
@@ -508,12 +366,12 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
                 {uploadedDoc ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      {getStatusIcon(uploadedDoc.status_validasi)}
-                      <Badge className={getStatusBadge(uploadedDoc.status_validasi)}>
-                        {uploadedDoc.status_validasi}
+                      {getStatusIcon(uploadedDoc.status_verifikasi)}
+                      <Badge className={getStatusBadge(uploadedDoc.status_verifikasi)}>
+                        {uploadedDoc.status_verifikasi}
                       </Badge>
                     </div>
-                    <p className="text-xs text-gray-600 truncate">{uploadedDoc.original_name}</p>
+                    <p className="text-xs text-gray-600 truncate">{uploadedDoc.nama_file}</p>
                     <div className="flex gap-2">
                       <Button
                         size="sm"
@@ -587,60 +445,68 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
           {previewFile && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="font-medium">{previewFile.original_name}</h3>
-                <Badge className={getStatusBadge(previewFile.status_validasi)}>
-                  {previewFile.status_validasi}
+                <h3 className="font-medium">{previewFile.nama_file}</h3>
+                <Badge className={getStatusBadge(previewFile.status_verifikasi)}>
+                  {previewFile.status_verifikasi}
                 </Badge>
               </div>
               
               {/* Simple Preview - Just show file info and download link */}
               <div className="w-full border rounded-lg p-6 bg-gray-50">
                 <div className="text-center space-y-4">
-                  {previewFile.mime?.startsWith('image/') ? (
+                  {previewFile.tipe_file?.startsWith('image/') ? (
                     <Image className="w-16 h-16 mx-auto text-blue-500" />
-                  ) : previewFile.mime === 'application/pdf' ? (
+                  ) : previewFile.tipe_file === 'application/pdf' ? (
                     <FileText className="w-16 h-16 mx-auto text-red-500" />
                   ) : (
                     <FileText className="w-16 h-16 mx-auto text-gray-500" />
                   )}
                   
                   <div>
-                    <p className="text-lg font-medium text-gray-900">{previewFile.original_name}</p>
+                    <p className="text-lg font-medium text-gray-900">{previewFile.nama_file}</p>
                     <p className="text-sm text-gray-600">
-                      {previewFile.mime === 'application/pdf' ? 'Dokumen PDF' : 
-                       previewFile.mime?.startsWith('image/') ? 'File Gambar' : 
+                      {previewFile.tipe_file === 'application/pdf' ? 'Dokumen PDF' : 
+                       previewFile.tipe_file?.startsWith('image/') ? 'File Gambar' : 
                        'Dokumen File'}
                     </p>
                     <p className="text-sm text-gray-500">
-                      Ukuran: {(previewFile.size! / 1024 / 1024).toFixed(2)} MB
+                      Ukuran: {(previewFile.ukuran_file! / 1024 / 1024).toFixed(2)} MB
                     </p>
                   </div>
                   
                   <div className="space-y-2">
-                    <a 
-                      href={previewFile.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-                    >
-                      <Eye className="w-4 h-4 mr-2" />
-                      Buka di Tab Baru
-                    </a>
-                    <br />
-                    <a 
-                      href={previewFile.url} 
-                      download={previewFile.original_name}
-                      className="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:text-blue-700 transition-colors"
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Download File
-                    </a>
+                    {previewFile.url && !previewFile.url.startsWith('blob:') ? (
+                      <>
+                        <a 
+                          href={previewFile.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                        >
+                          <Eye className="w-4 h-4 mr-2" />
+                          Buka di Tab Baru
+                        </a>
+                        <br />
+                        <a 
+                          href={previewFile.url} 
+                          download={previewFile.nama_file}
+                          className="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:text-blue-700 transition-colors"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download File
+                        </a>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">
+                        URL tidak tersedia atau tidak valid
+                      </div>
+                    )}
                   </div>
                   
-                  {previewFile.catatan && (
+                  {previewFile.catatan_verifikasi && (
                     <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                       <p className="text-sm text-yellow-800">
-                        <strong>Catatan:</strong> {previewFile.catatan}
+                        <strong>Catatan:</strong> {previewFile.catatan_verifikasi}
                       </p>
                     </div>
                   )}
@@ -648,21 +514,25 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
               </div>
               
               <div className="text-sm text-gray-600 space-y-2">
-                <p>Ukuran: {(previewFile.size! / 1024 / 1024).toFixed(2)} MB</p>
-                <p>Format: {previewFile.mime}</p>
-                {previewFile.catatan && (
-                  <p>Catatan: {previewFile.catatan}</p>
+                <p>Ukuran: {(previewFile.ukuran_file! / 1024 / 1024).toFixed(2)} MB</p>
+                <p>Format: {previewFile.tipe_file}</p>
+                {previewFile.catatan_verifikasi && (
+                  <p>Catatan: {previewFile.catatan_verifikasi}</p>
                 )}
                 <div className="pt-2">
-                  <a 
-                    href={previewFile.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:text-blue-700 transition-colors"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Buka di Tab Baru
-                  </a>
+                  {previewFile.url && !previewFile.url.startsWith('blob:') ? (
+                    <a 
+                      href={previewFile.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:text-blue-700 transition-colors"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Buka di Tab Baru
+                    </a>
+                  ) : (
+                    <span className="text-sm text-gray-500">URL tidak tersedia</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -688,9 +558,9 @@ const UploadDokumenSantri: React.FC<UploadDokumenSantriProps> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Valid">Valid</SelectItem>
-                    <SelectItem value="Perlu Perbaikan">Perlu Perbaikan</SelectItem>
-                    <SelectItem value="Tidak Valid">Tidak Valid</SelectItem>
+                    <SelectItem value="Diverifikasi">Diverifikasi</SelectItem>
+                    <SelectItem value="Belum Diverifikasi">Belum Diverifikasi</SelectItem>
+                    <SelectItem value="Ditolak">Ditolak</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

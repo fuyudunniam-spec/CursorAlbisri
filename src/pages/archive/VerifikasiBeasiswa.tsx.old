@@ -1,0 +1,496 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { 
+  Search, 
+  Eye, 
+  CheckCircle, 
+  XCircle,
+  Clock,
+  User,
+  FileText,
+  DollarSign,
+  Calendar,
+  Filter
+} from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+interface PengajuanBeasiswa {
+  id: string;
+  santri_id: string;
+  jenis_beasiswa: string;
+  persentase_beasiswa: number;
+  komponen_tercover: string[];
+  status: 'draft' | 'pending' | 'diverifikasi' | 'disetujui' | 'ditolak' | 'dicabut';
+  alasan_pengajuan: string;
+  dokumen_pendukung: string[];
+  created_at: string;
+  verified_at?: string;
+  verified_by?: string;
+  catatan_verifikasi?: string;
+  // Santri info
+  santri?: {
+    nama_lengkap: string;
+    nis: string;
+    kelas: string;
+    program_id?: string;
+    program?: {
+      nama_program: string;
+      kode_program: string;
+    };
+  };
+}
+
+const VerifikasiBeasiswa: React.FC = () => {
+  const [pengajuan, setPengajuan] = useState<PengajuanBeasiswa[]>([]);
+  const [selectedPengajuan, setSelectedPengajuan] = useState<PengajuanBeasiswa | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [verifikasiNote, setVerifikasiNote] = useState('');
+
+  useEffect(() => {
+    fetchPengajuan();
+  }, []);
+
+  const fetchPengajuan = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('pengajuan_beasiswa_santri')
+        .select(`
+          *,
+          santri:santri_id (
+            nama_lengkap,
+            nis,
+            kelas,
+            program_id,
+            program:program_id (
+              nama_program,
+              kode_program
+            )
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPengajuan(data || []);
+    } catch (error: any) {
+      toast.error('Gagal memuat pengajuan: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifikasi = async (pengajuanId: string, status: 'diverifikasi' | 'ditolak') => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const updateData: any = {
+        status,
+        verified_at: new Date().toISOString(),
+        verified_by: user?.id
+      };
+
+      // Only add catatan_verifikasi if it's not empty
+      if (verifikasiNote && verifikasiNote.trim()) {
+        updateData.catatan_verifikasi = verifikasiNote.trim();
+      }
+
+      const { error } = await supabase
+        .from('pengajuan_beasiswa_santri')
+        .update(updateData)
+        .eq('id', pengajuanId);
+
+      if (error) {
+        console.error('Update error:', error);
+        throw error;
+      }
+
+      toast.success(`Pengajuan berhasil ${status === 'diverifikasi' ? 'diverifikasi' : 'ditolak'}`);
+      setDialogOpen(false);
+      setVerifikasiNote('');
+      fetchPengajuan();
+    } catch (error: any) {
+      console.error('Verifikasi error:', error);
+      toast.error('Gagal memverifikasi: ' + error.message);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants = {
+      draft: { variant: 'secondary' as const, icon: Clock, text: 'Draft' },
+      pending: { variant: 'secondary' as const, icon: Clock, text: 'Menunggu Verifikasi' },
+      diverifikasi: { variant: 'default' as const, icon: CheckCircle, text: 'Diverifikasi' },
+      disetujui: { variant: 'default' as const, icon: CheckCircle, text: 'Disetujui' },
+      ditolak: { variant: 'destructive' as const, icon: XCircle, text: 'Ditolak' },
+      dicabut: { variant: 'secondary' as const, icon: XCircle, text: 'Dicabut' }
+    };
+    
+    const config = variants[status as keyof typeof variants] || variants.pending;
+    const Icon = config.icon;
+    
+    return (
+      <Badge variant={config.variant} className="flex items-center gap-1">
+        <Icon className="h-3 w-3" />
+        {config.text}
+      </Badge>
+    );
+  };
+
+  const filteredPengajuan = pengajuan.filter(p => {
+    const matchesSearch = 
+      p.santri?.nama_lengkap.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.santri?.nisn.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.jenis_beasiswa.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+    
+    return matchesSearch && matchesStatus;
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">Memuat pengajuan...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold">Verifikasi Beasiswa</h1>
+          <p className="text-muted-foreground">Verifikasi dan validasi pengajuan beasiswa santri</p>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Cari nama santri, NIS, atau jenis beasiswa..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Filter Status" />
+          </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Semua Status</SelectItem>
+          <SelectItem value="pending">Menunggu Verifikasi</SelectItem>
+          <SelectItem value="diverifikasi">Diverifikasi</SelectItem>
+          <SelectItem value="disetujui">Disetujui</SelectItem>
+          <SelectItem value="ditolak">Ditolak</SelectItem>
+        </SelectContent>
+        </Select>
+      </div>
+
+      {/* Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Daftar Pengajuan Beasiswa
+          </CardTitle>
+          <CardDescription>
+            {filteredPengajuan.length} pengajuan ditemukan
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Santri</TableHead>
+                <TableHead>Program</TableHead>
+                <TableHead>Jenis Beasiswa</TableHead>
+                <TableHead>Coverage</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Tanggal</TableHead>
+                <TableHead>Aksi</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredPengajuan.map((peng) => (
+                <TableRow key={peng.id}>
+                  <TableCell>
+                    <div>
+                      <p className="font-semibold">{peng.santri?.nama_lengkap}</p>
+                      <p className="text-sm text-muted-foreground">NISN: {peng.santri?.nisn}</p>
+                      <p className="text-sm text-muted-foreground">Kelas: {peng.santri?.kelas}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div>
+                      <p className="font-medium">{peng.santri?.program?.nama_program}</p>
+                      <p className="text-sm text-muted-foreground">{peng.santri?.program?.kode_program}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{peng.jenis_beasiswa}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-4 w-4 text-primary" />
+                      <span className="font-semibold">{peng.persentase_beasiswa}%</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {peng.komponen_tercover ? peng.komponen_tercover.length : 0} komponen
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    {getStatusBadge(peng.status)}
+                  </TableCell>
+                  <TableCell>
+                    <div>
+                      <p className="text-sm">{new Date(peng.created_at).toLocaleDateString('id-ID')}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(peng.created_at).toLocaleTimeString('id-ID')}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedPengajuan(peng)}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          Detail
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle>Detail Pengajuan Beasiswa</DialogTitle>
+                          <DialogDescription>
+                            Verifikasi dan validasi pengajuan beasiswa
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        {selectedPengajuan && (
+                          <div className="space-y-6">
+                            {/* Santri Info */}
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                  <User className="h-5 w-5" />
+                                  Informasi Santri
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <Label>Nama Lengkap</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.nama_lengkap}</p>
+                                </div>
+                                <div>
+                                  <Label>NISN</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.nisn}</p>
+                                </div>
+                                <div>
+                                  <Label>Kelas</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.kelas}</p>
+                                </div>
+                                <div>
+                                  <Label>Program</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.program?.nama_program}</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            {/* Beasiswa Details */}
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                  <DollarSign className="h-5 w-5" />
+                                  Detail Beasiswa
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <Label>Jenis Beasiswa</Label>
+                                    <Badge variant="outline" className="mt-1">{selectedPengajuan.jenis_beasiswa}</Badge>
+                                  </div>
+                                  <div>
+                                    <Label>Persentase Coverage</Label>
+                                    <p className="text-2xl font-bold text-primary mt-1">{selectedPengajuan.persentase_beasiswa}%</p>
+                                  </div>
+                                </div>
+                                
+                                <div>
+                                  <Label>Komponen Tercover</Label>
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    {selectedPengajuan.komponen_tercover && selectedPengajuan.komponen_tercover.length > 0 ? (
+                                      selectedPengajuan.komponen_tercover.map((komponen, idx) => (
+                                        <Badge key={idx} variant="secondary">{komponen}</Badge>
+                                      ))
+                                    ) : (
+                                      <p className="text-muted-foreground">Tidak ada komponen yang didefinisikan</p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <Label>Alasan Pengajuan</Label>
+                                  <p className="mt-1 p-3 bg-muted rounded-lg">{selectedPengajuan.alasan_pengajuan}</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            {/* Dokumen Pendukung */}
+                            {selectedPengajuan.dokumen_pendukung && Array.isArray(selectedPengajuan.dokumen_pendukung) && selectedPengajuan.dokumen_pendukung.length > 0 && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="flex items-center gap-2">
+                                    <FileText className="h-5 w-5" />
+                                    Dokumen Pendukung
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    {selectedPengajuan.dokumen_pendukung && Array.isArray(selectedPengajuan.dokumen_pendukung) && selectedPengajuan.dokumen_pendukung.length > 0 ? (
+                                      selectedPengajuan.dokumen_pendukung.map((doc, idx) => (
+                                        <div key={idx} className="border rounded-lg p-4">
+                                          <p className="font-medium mb-2">Dokumen {idx + 1}</p>
+                                          <img 
+                                            src={doc} 
+                                            alt={`Dokumen ${idx + 1}`}
+                                            className="w-full h-48 object-cover rounded"
+                                          />
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <div className="col-span-2 text-center py-8 text-muted-foreground">
+                                        <FileText className="h-8 w-8 mx-auto mb-2" />
+                                        <p>Tidak ada dokumen pendukung</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+
+                            {/* Verifikasi Actions */}
+                            {selectedPengajuan.status === 'pending' && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Verifikasi Pengajuan</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div>
+                                    <Label>Catatan Verifikasi</Label>
+                                    <Textarea
+                                      value={verifikasiNote}
+                                      onChange={(e) => setVerifikasiNote(e.target.value)}
+                                      placeholder="Tambahkan catatan verifikasi..."
+                                      rows={3}
+                                    />
+                                  </div>
+                                  
+                                  <div className="flex gap-2">
+                                    <Button
+                                      onClick={() => handleVerifikasi(selectedPengajuan.id, 'ditolak')}
+                                      variant="destructive"
+                                      className="flex-1"
+                                    >
+                                      <XCircle className="h-4 w-4 mr-2" />
+                                      Tolak Pengajuan
+                                    </Button>
+                                    <Button
+                                      onClick={() => handleVerifikasi(selectedPengajuan.id, 'diverifikasi')}
+                                      className="flex-1"
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-2" />
+                                      Verifikasi
+                                    </Button>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+
+                            {/* Status Info */}
+                            {selectedPengajuan.status !== 'pending' && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Status Verifikasi</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      {getStatusBadge(selectedPengajuan.status)}
+                                    </div>
+                                    {selectedPengajuan.catatan_verifikasi && (
+                                      <div>
+                                        <Label>Catatan Verifikasi</Label>
+                                        <p className="mt-1 p-3 bg-muted rounded-lg">{selectedPengajuan.catatan_verifikasi}</p>
+                                      </div>
+                                    )}
+                                    {selectedPengajuan.verified_at && (
+                                      <div>
+                                        <Label>Tanggal Verifikasi</Label>
+                                        <p className="font-semibold">
+                                          {new Date(selectedPengajuan.verified_at).toLocaleString('id-ID')}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+                          </div>
+                        )}
+                      </DialogContent>
+                    </Dialog>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          {filteredPengajuan.length === 0 && (
+            <div className="text-center py-12">
+              <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-muted-foreground">Tidak ada pengajuan ditemukan</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default VerifikasiBeasiswa;

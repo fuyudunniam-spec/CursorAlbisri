@@ -1,463 +1,292 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import {
-  Plus,
-  Search,
-  Filter,
-  Download,
-  Upload,
-  MoreVertical,
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { 
+  Plus, 
+  Search, 
+  Filter, 
+  MoreHorizontal,
   Edit,
   Trash2,
   Eye,
   Users,
   GraduationCap,
   Calendar,
-  FileText,
-  RefreshCw
+  Phone,
+  MapPin,
+  User,
+  Shield,
+  Download,
+  Upload,
+  ChevronUp,
+  ChevronDown
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
-import SantriForm from "@/components/SantriForm";
-import UploadDokumenSantri from "@/components/UploadDokumenSantri";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import SantriFormWizard from '@/components/SantriFormWizard';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import { getSafeAvatarUrl } from '@/utils/url.utils';
 
 interface SantriData {
   id: string;
+  nis?: string;
   nama_lengkap: string;
-  nis: string;
-  nik?: string;
-  tanggal_lahir: string;
+  tempat_lahir?: string;
+  tanggal_lahir?: string;
   jenis_kelamin: string;
-  alamat: string;
-  no_whatsapp?: string;
   kategori: string;
-  status_anak?: string;
-  nama_wali?: string;
-  no_telepon_wali?: string;
-  jumlah_saudara?: number;
-  hobi?: string;
-  cita_cita?: string;
-  created_at: string;
-  updated_at: string;
-  total_dokumen_required?: number;
-  total_dokumen_uploaded?: number;
-  total_dokumen_valid?: number;
+  angkatan: string;
+  status_santri: string;
+  alamat?: string;
+  no_whatsapp?: string;
+  foto_profil?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export default function Santri() {
-  const [santriData, setSantriData] = useState<SantriData[]>([]);
-  const [filteredData, setFilteredData] = useState<SantriData[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterKategori, setFilterKategori] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [showForm, setShowForm] = useState(false);
-  const [editingSantri, setEditingSantri] = useState<SantriData | null>(null);
-  const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [selectedSantriForUpload, setSelectedSantriForUpload] = useState<SantriData | null>(null);
-  const [stats, setStats] = useState({
-    total: 0,
-    reguler: 0,
-    binaanMukim: 0,
-    binaanNonMukim: 0,
-    yatim: 0,
-    piatu: 0,
-    yatimPiatu: 0,
-    dhuafa: 0
-  });
+const Santri = () => {
   const navigate = useNavigate();
+  const [santriData, setSantriData] = useState<SantriData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterKategori, setFilterKategori] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editingSantri, setEditingSantri] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'nama' | 'kategori' | 'status' | 'angkatan' | 'created_at'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
+  const [selectedSantri, setSelectedSantri] = useState<string[]>([]);
+  const [showBulkActions, setShowBulkActions] = useState(false);
 
-  const loadSantriData = async (force = false) => {
+  // Load data santri (auto-approved)
+  const loadSantriData = async () => {
     try {
-      console.log('loadSantriData called, isLoading:', isLoading, 'force:', force);
-      if (isLoading && !force) {
-        console.log('Skipping load - already loading and not forced');
-        return; // Prevent multiple simultaneous loads
-      }
       setIsLoading(true);
-      
-      // Check authentication first
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      console.log('Auth check:', { user, authError });
-      
-      if (authError) {
-        console.error('Auth error:', authError);
-        toast.error('Masalah autentikasi: ' + authError.message);
-        return;
-      }
-      
-      // Load santri data first without joins
-      const { data: santri, error: santriError } = await supabase
+      const { data, error } = await supabase
         .from('santri')
         .select('*')
         .order('created_at', { ascending: false });
 
-      console.log('Supabase response:', { santri, santriError });
-
-      if (santriError) {
-        console.error('Supabase error details:', santriError);
-        throw santriError;
-      }
-
-      // Load all documents for all santri in one query
-      const santriIds = (santri || []).map(s => s.id);
-      let allDocuments: any[] = [];
-      
-      if (santriIds.length > 0) {
-        const { data: documents, error: docError } = await supabase
-          .from('dokumen_santri')
-          .select('santri_id, status_validasi')
-          .in('santri_id', santriIds)
-          .eq('is_active', true);
-
-        if (docError) {
-          console.error('Error loading documents:', docError);
-        } else {
-          allDocuments = documents || [];
-        }
-      }
-
-
-      // Calculate completeness for each santri
-      const santriWithCompleteness = (santri || []).map((s): SantriData => {
-        const santriDocuments = allDocuments.filter(d => d.santri_id === s.id);
-        const totalUploaded = santriDocuments.length;
-        
-        // Simplified approach: count all valid documents and set a reasonable required count
-        const santriWithStatus = s as any;
-        const validRequiredDocs = santriDocuments.filter(doc => doc.status_validasi === 'Valid').length;
-        
-        // Set required count based on category and status
-        let totalRequired = 5; // Base minimum
-        
-        if (s.kategori === 'Binaan Mukim' || s.kategori === 'Binaan Non-Mukim') {
-          totalRequired = 7; // More documents required for Binaan
-        }
-        
-        if (santriWithStatus.status_anak === 'Yatim' || santriWithStatus.status_anak === 'Piatu' || santriWithStatus.status_anak === 'Yatim Piatu') {
-          totalRequired += 2; // Additional documents for special status
-        }
-
-        console.log(`Santri ${s.nama_lengkap} (${s.kategori}, ${santriWithStatus.status_anak}): ${validRequiredDocs}/${totalRequired} valid docs`);
-        console.log(`Available docs:`, santriDocuments.map(d => `${d.kode_dokumen}(${d.status_validasi})`));
-
-        return {
-          ...s,
-          total_dokumen_required: totalRequired,
-          total_dokumen_uploaded: totalUploaded,
-          total_dokumen_valid: validRequiredDocs
-        } as SantriData;
-      });
-
-      console.log('Setting santri data:', santriWithCompleteness);
-      setSantriData(santriWithCompleteness);
-      calculateStats(santriWithCompleteness);
-
+      if (error) throw error;
+      setSantriData(data || []);
     } catch (error) {
       console.error('Error loading santri data:', error);
-      toast.error('Gagal memuat data santri: ' + (error as Error).message);
+      toast.error('Gagal memuat data santri');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const calculateStats = (data: SantriData[]) => {
-    const newStats = {
-      total: data.length,
-      reguler: data.filter(s => s.kategori === 'Reguler').length,
-      binaanMukim: data.filter(s => s.kategori === 'Binaan Mukim').length,
-      binaanNonMukim: data.filter(s => s.kategori === 'Binaan Non-Mukim').length,
-      yatim: data.filter(s => s.status_anak === 'Yatim').length,
-      piatu: data.filter(s => s.status_anak === 'Piatu').length,
-      yatimPiatu: data.filter(s => s.status_anak === 'Yatim Piatu').length,
-      dhuafa: data.filter(s => s.status_anak === 'Dhuafa').length
-    };
-    setStats(newStats);
-  };
-
-  const refreshData = () => {
-    console.log('refreshData called');
-    loadSantriData(true);
-  };
-
   useEffect(() => {
-    console.log('Santri component mounted, loading data...');
-    // Add a small delay to ensure component is fully mounted
-    const timer = setTimeout(() => {
-      loadSantriData();
-    }, 100);
-    return () => clearTimeout(timer);
+    loadSantriData();
   }, []);
 
+  // Filter and sort data
+  const filteredData = santriData.filter(santri => {
+    const matchesSearch = santri.nama_lengkap.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         santri.id_santri?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesKategori = filterKategori === 'all' || !filterKategori || santri.kategori === filterKategori;
+    const matchesStatus = filterStatus === 'all' || !filterStatus || (santri.status_santri || (santri as any).status_baru) === filterStatus;
+    
+    return matchesSearch && matchesKategori && matchesStatus;
+  }).sort((a, b) => {
+    let aValue, bValue;
+    
+    switch (sortBy) {
+      case 'nama':
+        aValue = a.nama_lengkap.toLowerCase();
+        bValue = b.nama_lengkap.toLowerCase();
+        break;
+      case 'kategori':
+        aValue = a.kategori;
+        bValue = b.kategori;
+        break;
+      case 'status':
+        aValue = a.status_santri || (a as any).status_baru;
+        bValue = b.status_santri || (b as any).status_baru;
+        break;
+      case 'angkatan':
+        aValue = a.angkatan;
+        bValue = b.angkatan;
+        break;
+      case 'created_at':
+        aValue = new Date(a.created_at || 0).getTime();
+        bValue = new Date(b.created_at || 0).getTime();
+        break;
+      default:
+        return 0;
+    }
+    
+    if (sortOrder === 'asc') {
+      return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+    } else {
+      return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
+    }
+  });
+
+  // Pagination
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedData = filteredData.slice(startIndex, endIndex);
+
+  // Reset to first page and clear selection when filters change
   useEffect(() => {
-    console.log('Filtering data...', { searchTerm, filterKategori, filterStatus });
-    let filtered = santriData;
+    setCurrentPage(1);
+    setSelectedSantri([]);
+  }, [searchTerm, filterKategori, filterStatus]);
 
-    if (searchTerm) {
-      filtered = filtered.filter(santri =>
-        santri.nama_lengkap.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (santri.nik || santri.nis).toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (santri.no_whatsapp || '').toLowerCase().includes(searchTerm.toLowerCase())
-      );
+  // Generate inisial nama
+  const generateInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word.charAt(0))
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  // Calculate age
+  const calculateAge = (birthDate: string) => {
+    if (!birthDate) return 0;
+    const today = new Date();
+    const birth = new Date(birthDate);
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
     }
+    return age;
+  };
 
-    if (filterKategori && filterKategori !== 'all') {
-      filtered = filtered.filter(santri => santri.kategori === filterKategori);
-    }
-
-    if (filterStatus && filterStatus !== 'all') {
-      filtered = filtered.filter(santri => santri.status_anak === filterStatus);
-    }
-
-    console.log('Filtered data:', filtered.length, 'items');
-    setFilteredData(filtered);
-  }, [santriData, searchTerm, filterKategori, filterStatus]);
-
-  const handleAddSantri = () => {
-    setEditingSantri(null);
+  // Handle edit
+  const handleEdit = (id: string) => {
+    setEditingSantri(id);
     setShowForm(true);
   };
 
-  const handleEditSantri = (santri: SantriData) => {
-    setEditingSantri(santri);
-    setShowForm(true);
-  };
-
-  const handleDeleteSantri = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus data santri ini? Semua dokumen dan data terkait akan ikut terhapus.')) {
-      return;
-    }
-
-    try {
-      // 1. Ambil semua dokumen santri terlebih dahulu
-      const { data: documents, error: docSelectError } = await supabase
-        .from('dokumen_santri')
-        .select('id')
-        .eq('santri_id', id);
-
-      if (docSelectError) {
-        console.warn('Warning selecting documents:', docSelectError);
-      }
-
-      // 2. Hapus dokumen audit log jika ada dokumen
-      if (documents && documents.length > 0) {
-        const docIds = documents.map(doc => doc.id);
-        const { error: auditLogError } = await supabase
-          .from('dokumen_audit_log')
+  // Handle delete
+  const handleDelete = async (id: string, name: string) => {
+    if (window.confirm(`Apakah Anda yakin ingin menghapus data santri "${name}"?`)) {
+      try {
+        const { error } = await supabase
+          .from('santri')
           .delete()
-          .in('dokumen_id', docIds);
-
-        if (auditLogError) {
-          console.warn('Warning deleting audit logs:', auditLogError);
-        }
-      }
-
-      // 3. Hapus dokumen santri
-      const { error: dokumenError } = await supabase
-        .from('dokumen_santri')
-        .delete()
-        .eq('santri_id', id);
-
-      if (dokumenError) {
-        console.warn('Warning deleting documents:', dokumenError);
-      }
-
-      // 4. Hapus data wali jika ada
-      const { error: waliError } = await supabase
-        .from('santri_wali')
-        .delete()
-        .eq('santri_id', id);
-
-      if (waliError) {
-        console.warn('Warning deleting wali data:', waliError);
-      }
-
-      // 5. Hapus data santri
-      const { error: santriError } = await supabase
-        .from('santri')
-        .delete()
-        .eq('id', id);
-
-      if (santriError) throw santriError;
-
-      toast.success('Data santri berhasil dihapus');
-      refreshData();
-    } catch (error) {
-      console.error('Error deleting santri:', error);
-      toast.error('Gagal menghapus data santri: ' + (error as Error).message);
-    }
-  };
-
-  const handleViewProfile = (santri: SantriData) => {
-    setSelectedSantriForUpload(santri);
-    setShowUploadDialog(true);
-  };
-
-  const handleDownloadCSV = async () => {
-    try {
-      setIsLoading(true);
-      
-      // Fetch all santri data with wali information
-      const { data: santriData, error: santriError } = await supabase
-        .from('santri')
-        .select(`
-          nama_lengkap,
-          alamat,
-          nik,
-          nomor_kk,
-          kategori,
-          status_anak,
-          nama_wali,
-          no_telepon_wali
-        `)
-        .order('nama_lengkap');
-
-      if (santriError) throw santriError;
-
-      // Fetch wali data for relationship information
-      const { data: waliData, error: waliError } = await supabase
-        .from('santri_wali')
-        .select(`
-          santri_id,
-          nama_lengkap,
-          hubungan_keluarga,
-          no_telepon
-        `);
-
-      if (waliError) {
-        console.warn('Warning fetching wali data:', waliError);
-      }
-
-      // Create CSV content
-      const headers = [
-        'Nama Lengkap',
-        'Alamat Lengkap', 
-        'NIK',
-        'No. KK',
-        'Kategori Santri',
-        'Status Santri',
-        'Nama Wali',
-        'Hubungan Wali',
-        'Nomor Telepon Wali'
-      ];
-
-      const csvRows = [headers.join(',')];
-
-      if (santriData) {
-        santriData.forEach((santri: any) => {
-          // Find wali data for this santri
-          const wali = waliData?.find((w: any) => w.santri_id === santri.id);
-          
-          const row = [
-            `"${santri.nama_lengkap || ''}"`,
-            `"${santri.alamat || ''}"`,
-            `"${santri.nik || ''}"`,
-            `"${santri.nomor_kk || ''}"`,
-            `"${santri.kategori || ''}"`,
-            `"${santri.status_anak || 'Normal'}"`,
-            `"${wali?.nama_lengkap || santri.nama_wali || ''}"`,
-            `"${wali?.hubungan_keluarga || ''}"`,
-            `"${wali?.no_telepon || santri.no_telepon_wali || ''}"`
-          ];
-          
-          csvRows.push(row.join(','));
-        });
-      }
-
-      // Create and download CSV file
-      const csvContent = csvRows.join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      
-      if (link.download !== undefined) {
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', `data_santri_${new Date().toISOString().split('T')[0]}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
-
-      toast.success('Data santri berhasil didownload');
-    } catch (error) {
-      console.error('Error downloading CSV:', error);
-      toast.error('Gagal mendownload data santri');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSaveSantri = async (santriData: Partial<SantriData>) => {
-    try {
-      if (editingSantri) {
-        // Update existing santri
-        const { error } = await supabase
-          .from('santri')
-          .update(santriData)
-          .eq('id', editingSantri.id);
+          .eq('id', id);
 
         if (error) throw error;
-        toast.success('Data santri berhasil diperbarui');
-      } else {
-        // Create new santri
-        const { error } = await supabase
-          .from('santri')
-          .insert(santriData as any);
-
-        if (error) throw error;
-        toast.success('Data santri berhasil ditambahkan');
+        
+        toast.success('Data santri berhasil dihapus');
+        loadSantriData();
+      } catch (error) {
+        console.error('Error deleting santri:', error);
+        toast.error('Gagal menghapus data santri');
       }
-
-      setShowForm(false);
-      setEditingSantri(null);
-      refreshData();
-    } catch (error) {
-      console.error('Error saving santri:', error);
-      toast.error('Gagal menyimpan data santri');
     }
   };
 
-  const getCompletenessColor = (valid: number, total: number) => {
-    if (valid === total) return "bg-green-500";
-    if (valid >= total * 0.7) return "bg-yellow-500";
-    if (valid >= total * 0.4) return "bg-orange-500";
-    return "bg-red-500";
+  // Get status badge color
+  const getStatusBadgeColor = (status: string) => {
+    switch (status) {
+      case 'Aktif':
+        return 'bg-green-100 text-green-800 border-green-200';
+      case 'Non-Aktif':
+        return 'bg-red-100 text-red-800 border-red-200';
+      case 'Alumni':
+        return 'bg-blue-100 text-blue-800 border-blue-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
   };
 
-  const getCompletenessText = (valid: number, total: number) => {
-    if (valid === total) return "Lengkap";
-    if (valid >= total * 0.7) return "Cukup";
-    if (valid >= total * 0.4) return "Kurang";
-    return "Belum";
+  // Get category badge color
+  const getCategoryBadgeColor = (kategori: string) => {
+    switch (kategori) {
+      case 'Reguler':
+        return 'bg-primary/10 text-primary border-primary/20';
+      case 'Binaan Mukim':
+        return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'Binaan Non-Mukim':
+        return 'bg-green-100 text-green-800 border-green-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 lg:p-8 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Data Santri</h1>
+          <h1 className="text-3xl lg:text-4xl font-bold text-foreground mb-2 flex items-center gap-3">
+            <Users className="w-8 h-8 text-primary" />
+            Data Santri
+          </h1>
           <p className="text-muted-foreground">
-            Kelola data santri dan dokumen yang diperlukan
+            Kelola data santri pesantren Al-Bisri
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={refreshData} variant="outline" size="sm">
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-          <Button onClick={handleDownloadCSV} variant="outline" size="sm" disabled={isLoading}>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              // Export functionality
+              const csvContent = [
+                ['Nama Lengkap', 'ID Santri', 'NISN', 'Kategori', 'Status', 'Angkatan', 'Umur', 'WhatsApp', 'Tipe Pembayaran'],
+                ...filteredData.map(santri => [
+                  santri.nama_lengkap,
+                  santri.id_santri || '',
+                  santri.nisn || '',
+                  santri.kategori,
+                  santri.status_santri || (santri as any).status_baru,
+                  santri.angkatan,
+                  santri.tanggal_lahir ? `${calculateAge(santri.tanggal_lahir)} tahun` : '-',
+                  santri.no_whatsapp || '',
+                  santri.tipe_pembayaran || 'Mandiri'
+                ])
+              ].map(row => row.join(',')).join('\n');
+              
+              const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+              const link = document.createElement('a');
+              link.href = URL.createObjectURL(blob);
+              link.download = `data-santri-${new Date().toISOString().split('T')[0]}.csv`;
+              link.click();
+            }}
+            className="bg-green-600 hover:bg-green-700 text-white"
+          >
             <Download className="w-4 h-4 mr-2" />
-            {isLoading ? 'Downloading...' : 'Download CSV'}
+            Export CSV
           </Button>
-          <Button onClick={handleAddSantri}>
+          <Button 
+            onClick={() => {
+              setEditingSantri(null);
+              setShowForm(true);
+            }}
+            className="bg-gradient-primary hover:opacity-90"
+          >
             <Plus className="w-4 h-4 mr-2" />
             Tambah Santri
           </Button>
@@ -465,75 +294,90 @@ export default function Santri() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Santri</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.total}</div>
-            <p className="text-xs text-muted-foreground">
-              Raw data: {santriData.length}
-            </p>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="border-0 shadow-soft">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Santri</p>
+                <p className="text-2xl font-bold text-foreground">{santriData.length}</p>
+              </div>
+              <div className="p-3 bg-primary/10 rounded-lg">
+                <Users className="w-6 h-6 text-primary" />
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Reguler</CardTitle>
-            <GraduationCap className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.reguler}</div>
+        <Card className="border-0 shadow-soft">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Santri Aktif</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {santriData.filter(s => (s.status_santri || (s as any).status_baru) === 'Aktif').length}
+                </p>
+              </div>
+              <div className="p-3 bg-green-100 rounded-lg">
+                <Shield className="w-6 h-6 text-green-600" />
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Binaan Mukim</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.binaanMukim}</div>
+        <Card className="border-0 shadow-soft">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Santri Mandiri</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {santriData.filter(s => s.tipe_pembayaran === 'Mandiri').length}
+                </p>
+              </div>
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <Shield className="w-6 h-6 text-blue-600" />
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Binaan Non-Mukim</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.binaanNonMukim}</div>
+        <Card className="border-0 shadow-soft">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Santri Penerima Bantuan</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {santriData.filter(s => s.tipe_pembayaran === 'Bantuan Yayasan').length}
+                </p>
+              </div>
+              <div className="p-3 bg-green-100 rounded-lg">
+                <GraduationCap className="w-6 h-6 text-green-600" />
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Search and Filter */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="w-5 h-5" />
-            Pencarian & Filter
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="search">Cari Santri</Label>
-              <Input
-                id="search"
-                placeholder="Nama, NIS, atau WhatsApp..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="kategori">Kategori</Label>
+      {/* Enhanced Filters and Controls */}
+      <Card className="border-0 shadow-soft">
+        <CardContent className="p-6">
+          <div className="space-y-4">
+            {/* Search and Filters Row */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                  <Input
+                    placeholder="Cari nama santri, ID Santri, atau NISN..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
               <Select value={filterKategori} onValueChange={setFilterKategori}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Semua Kategori" />
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Filter Kategori" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Kategori</SelectItem>
@@ -542,170 +386,446 @@ export default function Santri() {
                   <SelectItem value="Binaan Non-Mukim">Binaan Non-Mukim</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="status">Status Anak</Label>
               <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Semua Status" />
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Filter Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Status</SelectItem>
-                  <SelectItem value="Yatim">Yatim</SelectItem>
-                  <SelectItem value="Piatu">Piatu</SelectItem>
-                  <SelectItem value="Yatim Piatu">Yatim Piatu</SelectItem>
-                  <SelectItem value="Dhuafa">Dhuafa</SelectItem>
+                  <SelectItem value="Aktif">Aktif</SelectItem>
+                  <SelectItem value="Non-Aktif">Non Aktif</SelectItem>
+                  <SelectItem value="Alumni">Alumni</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearchTerm("");
-                  setFilterKategori("all");
-                  setFilterStatus("all");
-                }}
-                className="w-full"
-              >
-                <Filter className="w-4 h-4 mr-2" />
-                Reset Filter
-              </Button>
+            
+            {/* Sort and Pagination Controls */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-muted-foreground">Urutkan:</span>
+                  <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nama">Nama</SelectItem>
+                      <SelectItem value="kategori">Kategori</SelectItem>
+                      <SelectItem value="status">Status</SelectItem>
+                      <SelectItem value="angkatan">Angkatan</SelectItem>
+                      <SelectItem value="created_at">Tanggal Daftar</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                    className="px-3"
+                  >
+                    {sortOrder === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Halaman {currentPage} dari {totalPages}</span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="h-8 w-8 p-0"
+                  >
+                    ←
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="h-8 w-8 p-0"
+                  >
+                    →
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Data Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Daftar Santri</span>
-            <Badge variant="secondary">
-              {filteredData.length} dari {santriData.length} santri
-            </Badge>
-          </CardTitle>
+      {/* Enhanced Data Table */}
+      <Card className="border-0 shadow-soft">
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Daftar Santri ({filteredData.length})
+            </CardTitle>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>Menampilkan {paginatedData.length} dari {filteredData.length} santri (Total: {santriData.length})</span>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <RefreshCw className="w-6 h-6 animate-spin mr-2" />
-              Memuat data...
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Memuat data...</p>
+              </div>
             </div>
           ) : filteredData.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              {santriData.length === 0 ? "Belum ada data santri" : "Tidak ada data yang sesuai dengan filter"}
+            <div className="text-center py-12">
+              <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium mb-2">Tidak ada data santri</h3>
+              <p className="text-muted-foreground mb-4">
+                {searchTerm || filterKategori || filterStatus 
+                  ? 'Tidak ada santri yang sesuai dengan filter'
+                  : 'Belum ada data santri yang terdaftar'
+                }
+              </p>
+              {!searchTerm && !filterKategori && !filterStatus && (
+                <Button onClick={() => setShowForm(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Tambah Santri Pertama
+                </Button>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left p-3 font-medium">Nama Lengkap</th>
-                    <th className="text-left p-3 font-medium">NIS</th>
-                    <th className="text-left p-3 font-medium">Kategori</th>
-                    <th className="text-left p-3 font-medium">Status Anak</th>
-                    <th className="text-left p-3 font-medium">Dokumen</th>
-                    <th className="text-left p-3 font-medium">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredData.map((santri, index) => (
-                    <tr key={`${santri.id}-${index}`} className="border-b hover:bg-muted/50">
-                      <td className="p-3">
-                        <div>
-                          <div className="font-medium">{santri.nama_lengkap}</div>
-                          <div className="text-sm text-muted-foreground">{santri.no_whatsapp || 'Tidak ada WhatsApp'}</div>
-                        </div>
-                      </td>
-                      <td className="p-3">{santri.nik || santri.nis}</td>
-                      <td className="p-3">
-                        <Badge variant="outline">{santri.kategori}</Badge>
-                      </td>
-                      <td className="p-3">
-                        <Badge 
-                          variant={santri.status_anak === 'Yatim' || santri.status_anak === 'Piatu' || santri.status_anak === 'Yatim Piatu' ? 'destructive' : 'secondary'}
-                        >
-                          {santri.status_anak || 'Normal'}
-                        </Badge>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className={`w-2 h-2 rounded-full ${getCompletenessColor(santri.total_dokumen_valid || 0, santri.total_dokumen_required || 0)}`}></div>
-                              <span className="text-sm font-medium">
-                                {santri.total_dokumen_valid || 0}/{santri.total_dokumen_required || 0}
-                              </span>
-                              <Badge variant="outline" className="text-xs">
-                                {getCompletenessText(santri.total_dokumen_valid || 0, santri.total_dokumen_required || 0)}
-                              </Badge>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              dokumen valid
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="font-semibold w-12">
+                      <input
+                        type="checkbox"
+                        checked={selectedSantri.length === paginatedData.length && paginatedData.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedSantri(paginatedData.map(s => s.id));
+                          } else {
+                            setSelectedSantri([]);
+                          }
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                    </TableHead>
+                    <TableHead className="font-semibold">Santri</TableHead>
+                    <TableHead className="font-semibold">Kategori</TableHead>
+                    <TableHead className="font-semibold">Status</TableHead>
+                    <TableHead className="font-semibold">Angkatan</TableHead>
+                    <TableHead className="font-semibold">Umur</TableHead>
+                    <TableHead className="font-semibold">Kontak</TableHead>
+                    <TableHead className="font-semibold">Tipe Pembayaran</TableHead>
+                    <TableHead className="font-semibold text-center w-20">Aksi</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedData.map((santri, index) => (
+                    <TableRow 
+                      key={santri.id} 
+                      className={`hover:bg-muted/50 transition-colors ${index % 2 === 0 ? 'bg-background' : 'bg-muted/20'}`}
+                    >
+                      <TableCell className="py-4 w-12">
+                        <input
+                          type="checkbox"
+                          checked={selectedSantri.includes(santri.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedSantri([...selectedSantri, santri.id]);
+                            } else {
+                              setSelectedSantri(selectedSantri.filter(id => id !== santri.id));
+                            }
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="w-12 h-12 ring-2 ring-muted">
+                            <AvatarImage 
+                              src={getSafeAvatarUrl(santri.foto_profil)} 
+                              alt={santri.nama_lengkap} 
+                            />
+                            <AvatarFallback className="text-sm font-medium">
+                              {generateInitials(santri.nama_lengkap)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-foreground truncate">{santri.nama_lengkap}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {santri.id_santri && (
+                                <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                                  ID: {santri.id_santri}
+                                </span>
+                              )}
+                              {santri.nisn && (
+                                <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                                  NISN: {santri.nisn}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditSantri(santri)}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleViewProfile(santri)}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteSantri(santri.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`${getCategoryBadgeColor(santri.kategori)} font-medium`}>
+                          {santri.kategori}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`${getStatusBadgeColor(santri.status_santri || (santri as any).status_baru)} font-medium`}>
+                          {santri.status_santri || (santri as any).status_baru}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium">{santri.angkatan}</span>
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium">
+                            {santri.tanggal_lahir ? `${calculateAge(santri.tanggal_lahir)} tahun` : '-'}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {santri.no_whatsapp ? (
+                          <div className="flex items-center gap-2">
+                            <Phone className="w-4 h-4 text-green-600" />
+                            <span className="text-sm font-medium text-green-700">{santri.no_whatsapp}</span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge 
+                          variant={santri.tipe_pembayaran === 'Bantuan Yayasan' ? 'default' : 'secondary'}
+                          className={santri.tipe_pembayaran === 'Bantuan Yayasan' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}
+                        >
+                          {santri.tipe_pembayaran || 'Mandiri'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              console.log('🔗 Navigating to profile with:', { santriId: santri.id, santriName: santri.nama_lengkap });
+                              navigate(`/santri/profile?santriId=${santri.id}&santriName=${encodeURIComponent(santri.nama_lengkap)}`);
+                            }}
+                            className="h-8 w-8 p-0 hover:bg-primary/10"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuLabel className="font-semibold">Aksi</DropdownMenuLabel>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleEdit(santri.id)} className="cursor-pointer">
+                                <Edit className="w-4 h-4 mr-2" />
+                                Edit Data
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => {
+                                  console.log('🔗 Navigating to profile with:', { santriId: santri.id, santriName: santri.nama_lengkap });
+                                  navigate(`/santri/profile?santriId=${santri.id}&santriName=${encodeURIComponent(santri.nama_lengkap)}`);
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <Eye className="w-4 h-4 mr-2" />
+                                Lihat Profil
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem 
+                                onClick={() => handleDelete(santri.id, santri.nama_lengkap)}
+                                className="text-red-600 cursor-pointer hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Hapus Santri
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          
+          {/* Bulk Actions Bar */}
+          {selectedSantri.length > 0 && (
+            <div className="flex items-center justify-between px-6 py-3 bg-primary/10 border-t">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-primary">
+                  {selectedSantri.length} santri dipilih
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedSantri([])}
+                  className="h-8 px-3"
+                >
+                  Batal
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // Bulk export selected santri
+                    const selectedData = paginatedData.filter(s => selectedSantri.includes(s.id));
+                    const csvContent = [
+                      ['Nama Lengkap', 'ID Santri', 'NISN', 'Kategori', 'Status', 'Angkatan', 'Umur', 'WhatsApp', 'Tipe Pembayaran'],
+                      ...selectedData.map(santri => [
+                        santri.nama_lengkap,
+                        santri.id_santri || '',
+                        santri.nisn || '',
+                        santri.kategori,
+                        santri.status_santri || (santri as any).status_baru,
+                        santri.angkatan,
+                        santri.tanggal_lahir ? `${calculateAge(santri.tanggal_lahir)} tahun` : '-',
+                        santri.no_whatsapp || '',
+                        santri.tipe_pembayaran || 'Mandiri'
+                      ])
+                    ].map(row => row.join(',')).join('\n');
+                    
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `data-santri-terpilih-${new Date().toISOString().split('T')[0]}.csv`;
+                    link.click();
+                  }}
+                  className="h-8 px-3"
+                >
+                  <Download className="w-4 h-4 mr-1" />
+                  Export Terpilih
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    if (confirm(`Apakah Anda yakin ingin menghapus ${selectedSantri.length} santri yang dipilih?`)) {
+                      // Bulk delete functionality
+                      selectedSantri.forEach(id => {
+                        handleDelete(id, 'Bulk Delete');
+                      });
+                      setSelectedSantri([]);
+                    }
+                  }}
+                  className="h-8 px-3"
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Hapus Terpilih
+                </Button>
+              </div>
+            </div>
+          )}
+          
+          {/* Pagination Footer */}
+          {!isLoading && filteredData.length > 0 && totalPages > 1 && (
+            <div className="flex items-center justify-between px-6 py-4 border-t bg-muted/20">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>
+                  Menampilkan {startIndex + 1}-{Math.min(endIndex, filteredData.length)} dari {filteredData.length} santri
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  className="h-8 px-3"
+                >
+                  Pertama
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1}
+                  className="h-8 px-3"
+                >
+                  ← Sebelumnya
+                </Button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pageNum = Math.max(1, Math.min(totalPages - 4, currentPage - 2)) + i;
+                    if (pageNum > totalPages) return null;
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className="h-8 w-8 p-0"
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage === totalPages}
+                  className="h-8 px-3"
+                >
+                  Selanjutnya →
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className="h-8 px-3"
+                >
+                  Terakhir
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Forms */}
+      {/* Santri Form Modal */}
       {showForm && (
-        <SantriForm
-          santriId={editingSantri?.id}
-          onSave={() => {
-            // SantriForm will handle the save internally
-            refreshData();
-          }}
-          onClose={() => {
-            setShowForm(false);
-            setEditingSantri(null);
-          }}
-        />
-      )}
-
-      {showUploadDialog && selectedSantriForUpload && (
-        <UploadDokumenSantri
-          santriId={selectedSantriForUpload.id}
-          kategori={selectedSantriForUpload.kategori}
-          statusAnak={selectedSantriForUpload.status_anak || ''}
-          onUploadComplete={() => {
-            refreshData();
-          }}
-        />
+        <ErrorBoundary>
+          <SantriFormWizard
+            santriId={editingSantri || undefined}
+            onClose={() => {
+              setShowForm(false);
+              setEditingSantri(null);
+            }}
+            onSave={async () => {
+              try {
+                await loadSantriData();
+              } catch (error) {
+                console.error('Error reloading santri data:', error);
+              }
+            }}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );
-}
+};
+
+export default Santri;

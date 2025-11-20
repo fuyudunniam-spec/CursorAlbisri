@@ -1,0 +1,87 @@
+/* Print Styles for Santri Data */
+
+@media print {
+  /* Hide elements that shouldn't be printed */
+  .print\\:hidden {
+    display: none !important;
+  }
+  
+  /* Show elements that should only appear in print */
+  .print\\:block {
+    display: block !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 1cm;
+  }
+
+  /* Body styling for print */
+  body {
+    font-size: 12pt;
+    line-height: 1.4;
+    color: #000;
+    background: #fff;
+  }
+
+  /* Card styling for print */
+  .print-card {
+    border: 1px solid #000;
+    margin-bottom: 1cm;
+    page-break-inside: avoid;
+  }
+
+  /* Header styling */
+  .print-header {
+    text-align: center;
+    margin-bottom: 1cm;
+    border-bottom: 2px solid #000;
+    padding-bottom: 0.5cm;
+  }
+
+  /* Section headers */
+  .print-section-header {
+    font-size: 14pt;
+    font-weight: bold;
+    margin: 0.5cm 0 0.3cm 0;
+    border-bottom: 1px solid #000;
+    padding-bottom: 0.2cm;
+  }
+
+  /* Data rows */
+  .print-data-row {
+    margin-bottom: 0.2cm;
+    display: flex;
+  }
+
+  .print-label {
+    width: 4cm;
+    font-weight: bold;
+  }
+
+  .print-value {
+    flex: 1;
+    margin-left: 0.5cm;
+  }
+
+  /* Footer */
+  .print-footer {
+    margin-top: 1cm;
+    text-align: center;
+    font-size: 10pt;
+    color: #666;
+    border-top: 1px solid #000;
+    padding-top: 0.3cm;
+  }
+
+  /* Avoid page breaks inside important sections */
+  .print-section {
+    page-break-inside: avoid;
+  }
+
+  /* Ensure proper spacing */
+  .print-space {
+    margin-bottom: 0.5cm;
+  }
+}

@@ -1,0 +1,662 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { 
+  FileText, 
+  Upload,
+  Check,
+  AlertCircle,
+  ChevronRight,
+  ChevronLeft,
+  DollarSign,
+  User,
+  FileCheck
+} from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { Progress } from "@/components/ui/progress";
+
+interface Santri {
+  id: string;
+  nis: string;
+  nama_lengkap: string;
+  program_id?: string;
+}
+
+interface Program {
+  id: string;
+  nama_program: string;
+  kode_program: string;
+}
+
+interface KomponenBiaya {
+  id: string;
+  nama_komponen: string;
+  kode_komponen: string;
+  tarif_per_bulan: number;
+  is_wajib: boolean;
+}
+
+const PengajuanBeasiswa: React.FC = () => {
+  const [step, setStep] = useState(1);
+  const [santriList, setSantriList] = useState<Santri[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [komponenBiaya, setKomponenBiaya] = useState<KomponenBiaya[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Form state
+  const [formData, setFormData] = useState({
+    santri_id: '',
+    jenis_beasiswa: 'Dhuafa',
+    persentase_beasiswa: 75,
+    periode_mulai: '',
+    alasan_pengajuan: '',
+    kondisi_ekonomi_keluarga: '',
+    prestasi_santri: '',
+    
+    // Kondisi keluarga
+    pekerjaan_ayah: '',
+    pekerjaan_ibu: '',
+    penghasilan_bulanan: '',
+    jumlah_tanggungan: '',
+    kondisi_rumah: '',
+    
+    // Komponen yang dipilih (untuk custom)
+    komponen_terpilih: [] as any[]
+  });
+
+  const [uploadedDocs, setUploadedDocs] = useState({
+    dokumen_ktp_ortu: [] as string[],
+    dokumen_kk: [] as string[],
+    dokumen_sktm: [] as string[]
+  });
+
+  useEffect(() => {
+    fetchSantriList();
+    fetchPrograms();
+  }, []);
+
+  useEffect(() => {
+    if (formData.santri_id) {
+      const santri = santriList.find(s => s.id === formData.santri_id);
+      if (santri?.program_id) {
+        fetchKomponenBiaya(santri.program_id);
+      }
+    }
+  }, [formData.santri_id, santriList]);
+
+  const fetchSantriList = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('santri')
+        .select('id, nis, nama_lengkap, program_id')
+        .order('nama_lengkap');
+
+      if (error) throw error;
+      setSantriList(data || []);
+    } catch (error: any) {
+      toast.error('Gagal memuat data santri: ' + error.message);
+    }
+  };
+
+  const fetchPrograms = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('program_santri')
+        .select('id, nama_program, kode_program')
+        .eq('is_active', true);
+
+      if (error) throw error;
+      setPrograms(data || []);
+    } catch (error: any) {
+      toast.error('Gagal memuat program: ' + error.message);
+    }
+  };
+
+  const fetchKomponenBiaya = async (programId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('komponen_biaya_program')
+        .select('*')
+        .eq('program_id', programId)
+        .order('urutan');
+
+      if (error) throw error;
+      setKomponenBiaya(data || []);
+      
+      // Auto-select all komponen wajib
+      const komponenTerpilih = (data || []).map(k => ({
+        kode: k.kode_komponen,
+        nama: k.nama_komponen,
+        tarif: k.tarif_per_bulan,
+        persentase: formData.persentase_beasiswa,
+        subsidi: (k.tarif_per_bulan * formData.persentase_beasiswa) / 100
+      }));
+      
+      setFormData(prev => ({
+        ...prev,
+        komponen_terpilih: komponenTerpilih
+      }));
+    } catch (error: any) {
+      toast.error('Gagal memuat komponen biaya: ' + error.message);
+    }
+  };
+
+  const calculateNominalPerBulan = () => {
+    return formData.komponen_terpilih.reduce((sum, k) => sum + k.subsidi, 0);
+  };
+
+  const getTotalTarif = () => {
+    return komponenBiaya.reduce((sum, k) => sum + k.tarif_per_bulan, 0);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: string) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setLoading(true);
+    try {
+      const uploadedUrls: string[] = [];
+
+      for (const file of Array.from(files)) {
+        // Convert to base64 untuk simpan di database (temporary solution)
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const base64 = await base64Promise;
+        uploadedUrls.push(base64);
+      }
+
+      setUploadedDocs(prev => ({
+        ...prev,
+        [field]: [...(prev[field as keyof typeof prev] || []), ...uploadedUrls]
+      }));
+
+      toast.success(`${files.length} dokumen berhasil diupload`);
+    } catch (error: any) {
+      toast.error('Gagal upload dokumen: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const dataToInsert = {
+        santri_id: formData.santri_id,
+        jenis_beasiswa: formData.jenis_beasiswa,
+        persentase_beasiswa: formData.persentase_beasiswa,
+        komponen_beasiswa: formData.komponen_terpilih,
+        nominal_per_bulan: calculateNominalPerBulan(),
+        tanggal_pengajuan: new Date().toISOString().split('T')[0],
+        periode_mulai: formData.periode_mulai,
+        alasan_pengajuan: formData.alasan_pengajuan,
+        kondisi_ekonomi_keluarga: formData.kondisi_ekonomi_keluarga,
+        prestasi_santri: formData.prestasi_santri,
+        pekerjaan_ayah: formData.pekerjaan_ayah,
+        pekerjaan_ibu: formData.pekerjaan_ibu,
+        penghasilan_bulanan: formData.penghasilan_bulanan ? parseFloat(formData.penghasilan_bulanan) : null,
+        jumlah_tanggungan: formData.jumlah_tanggungan ? parseInt(formData.jumlah_tanggungan) : null,
+        kondisi_rumah: formData.kondisi_rumah,
+        dokumen_ktp_ortu: uploadedDocs.dokumen_ktp_ortu,
+        dokumen_kk: uploadedDocs.dokumen_kk,
+        dokumen_sktm: uploadedDocs.dokumen_sktm,
+        status: 'pending',
+        created_by: user?.id
+      };
+
+      const { error } = await supabase
+        .from('pengajuan_beasiswa_santri')
+        .insert([dataToInsert]);
+
+      if (error) throw error;
+
+      toast.success('Pengajuan beasiswa berhasil dikirim!');
+      
+      // Reset form
+      setFormData({
+        santri_id: '',
+        jenis_beasiswa: 'Dhuafa',
+        persentase_beasiswa: 75,
+        periode_mulai: '',
+        alasan_pengajuan: '',
+        kondisi_ekonomi_keluarga: '',
+        prestasi_santri: '',
+        pekerjaan_ayah: '',
+        pekerjaan_ibu: '',
+        penghasilan_bulanan: '',
+        jumlah_tanggungan: '',
+        kondisi_rumah: '',
+        komponen_terpilih: []
+      });
+      setUploadedDocs({
+        dokumen_ktp_ortu: [],
+        dokumen_kk: [],
+        dokumen_sktm: []
+      });
+      setStep(1);
+    } catch (error: any) {
+      toast.error('Gagal mengajukan beasiswa: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectedSantri = santriList.find(s => s.id === formData.santri_id);
+
+  return (
+    <div className="container mx-auto p-6 max-w-4xl">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Pengajuan Beasiswa</h1>
+        <p className="text-muted-foreground">Form pengajuan beasiswa untuk santri</p>
+      </div>
+
+      {/* Progress Steps */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          {[1, 2, 3, 4].map((s) => (
+            <div key={s} className="flex items-center flex-1">
+              <div className={`flex items-center justify-center w-10 h-10 rounded-full ${
+                step >= s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}>
+                {step > s ? <Check className="h-5 w-5" /> : s}
+              </div>
+              {s < 4 && (
+                <div className={`flex-1 h-1 mx-2 ${step > s ? 'bg-primary' : 'bg-muted'}`} />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className={step >= 1 ? 'font-medium' : 'text-muted-foreground'}>Data Santri</span>
+          <span className={step >= 2 ? 'font-medium' : 'text-muted-foreground'}>Jenis & Persentase</span>
+          <span className={step >= 3 ? 'font-medium' : 'text-muted-foreground'}>Alasan & Kondisi</span>
+          <span className={step >= 4 ? 'font-medium' : 'text-muted-foreground'}>Dokumen</span>
+        </div>
+      </div>
+
+      {/* Step Content */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {step === 1 && 'Pilih Santri'}
+            {step === 2 && 'Jenis & Persentase Beasiswa'}
+            {step === 3 && 'Alasan & Kondisi Keluarga'}
+            {step === 4 && 'Upload Dokumen Pendukung'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* STEP 1: Pilih Santri */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Pilih Santri *</Label>
+                <Select
+                  value={formData.santri_id}
+                  onValueChange={(value) => setFormData({...formData, santri_id: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih santri..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {santriList.map((santri) => (
+                      <SelectItem key={santri.id} value={santri.id}>
+                        {santri.nisn} - {santri.nama_lengkap}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {selectedSantri && (
+                <Card className="bg-muted">
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                        <User className="h-6 w-6 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">{selectedSantri.nama_lengkap}</p>
+                        <p className="text-sm text-muted-foreground">NISN: {selectedSantri.nisn}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <div className="space-y-2">
+                <Label>Periode Mulai Beasiswa *</Label>
+                <Input
+                  type="date"
+                  value={formData.periode_mulai}
+                  onChange={(e) => setFormData({...formData, periode_mulai: e.target.value})}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Jenis & Persentase */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Jenis Beasiswa *</Label>
+                <Select
+                  value={formData.jenis_beasiswa}
+                  onValueChange={(value) => setFormData({...formData, jenis_beasiswa: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Yatim">Yatim</SelectItem>
+                    <SelectItem value="Dhuafa">Dhuafa (Tidak Mampu)</SelectItem>
+                    <SelectItem value="Prestasi Akademik">Prestasi Akademik</SelectItem>
+                    <SelectItem value="Prestasi Non-Akademik">Prestasi Non-Akademik</SelectItem>
+                    <SelectItem value="Anak Guru/Karyawan">Anak Guru/Karyawan</SelectItem>
+                    <SelectItem value="Kombinasi">Kombinasi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Persentase Beasiswa yang Diajukan: {formData.persentase_beasiswa}%</Label>
+                <Input
+                  type="range"
+                  min="25"
+                  max="100"
+                  step="25"
+                  value={formData.persentase_beasiswa}
+                  onChange={(e) => {
+                    const newPersentase = parseInt(e.target.value);
+                    setFormData({...formData, persentase_beasiswa: newPersentase});
+                    
+                    // Update subsidi di komponen
+                    setFormData(prev => ({
+                      ...prev,
+                      komponen_terpilih: prev.komponen_terpilih.map(k => ({
+                        ...k,
+                        persentase: newPersentase,
+                        subsidi: (k.tarif * newPersentase) / 100
+                      }))
+                    }));
+                  }}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>25%</span>
+                  <span>50%</span>
+                  <span>75%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              {komponenBiaya.length > 0 && (
+                <Card className="bg-primary/5">
+                  <CardHeader>
+                    <CardTitle className="text-sm">Rincian Biaya & Subsidi</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {komponenBiaya.map((komponen) => {
+                      const subsidi = (komponen.tarif_per_bulan * formData.persentase_beasiswa) / 100;
+                      const sisaBayar = komponen.tarif_per_bulan - subsidi;
+                      
+                      return (
+                        <div key={komponen.id} className="flex justify-between items-center text-sm">
+                          <span>{komponen.nama_komponen}</span>
+                          <div className="text-right">
+                            <p className="font-semibold">
+                              Subsidi: Rp {subsidi.toLocaleString('id-ID')}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Bayar: Rp {sisaBayar.toLocaleString('id-ID')}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    <div className="pt-3 border-t flex justify-between font-bold">
+                      <span>Total Subsidi/Bulan:</span>
+                      <span className="text-primary">
+                        Rp {calculateNominalPerBulan().toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Orang Tua Bayar:</span>
+                      <span>
+                        Rp {(getTotalTarif() - calculateNominalPerBulan()).toLocaleString('id-ID')}/bulan
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* STEP 3: Alasan & Kondisi */}
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Alasan Pengajuan *</Label>
+                <Textarea
+                  required
+                  rows={4}
+                  value={formData.alasan_pengajuan}
+                  onChange={(e) => setFormData({...formData, alasan_pengajuan: e.target.value})}
+                  placeholder="Jelaskan alasan mengajukan beasiswa..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Kondisi Ekonomi Keluarga *</Label>
+                <Textarea
+                  required
+                  rows={4}
+                  value={formData.kondisi_ekonomi_keluarga}
+                  onChange={(e) => setFormData({...formData, kondisi_ekonomi_keluarga: e.target.value})}
+                  placeholder="Deskripsikan kondisi ekonomi keluarga..."
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Pekerjaan Ayah</Label>
+                  <Input
+                    value={formData.pekerjaan_ayah}
+                    onChange={(e) => setFormData({...formData, pekerjaan_ayah: e.target.value})}
+                    placeholder="Buruh harian lepas"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Pekerjaan Ibu</Label>
+                  <Input
+                    value={formData.pekerjaan_ibu}
+                    onChange={(e) => setFormData({...formData, pekerjaan_ibu: e.target.value})}
+                    placeholder="Tidak bekerja"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Penghasilan Bulanan (Rp)</Label>
+                  <Input
+                    type="number"
+                    value={formData.penghasilan_bulanan}
+                    onChange={(e) => setFormData({...formData, penghasilan_bulanan: e.target.value})}
+                    placeholder="1500000"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Jumlah Tanggungan</Label>
+                  <Input
+                    type="number"
+                    value={formData.jumlah_tanggungan}
+                    onChange={(e) => setFormData({...formData, jumlah_tanggungan: e.target.value})}
+                    placeholder="5"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Kondisi Rumah</Label>
+                <Input
+                  value={formData.kondisi_rumah}
+                  onChange={(e) => setFormData({...formData, kondisi_rumah: e.target.value})}
+                  placeholder="Kontrak, Milik Sendiri, dll"
+                />
+              </div>
+
+              {formData.jenis_beasiswa.includes('Prestasi') && (
+                <div className="space-y-2">
+                  <Label>Prestasi Santri</Label>
+                  <Textarea
+                    rows={3}
+                    value={formData.prestasi_santri}
+                    onChange={(e) => setFormData({...formData, prestasi_santri: e.target.value})}
+                    placeholder="Deskripsikan prestasi yang telah diraih..."
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STEP 4: Upload Dokumen */}
+          {step === 4 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>KTP Orang Tua *</Label>
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  multiple
+                  onChange={(e) => handleFileUpload(e, 'dokumen_ktp_ortu')}
+                  disabled={loading}
+                />
+                {uploadedDocs.dokumen_ktp_ortu.length > 0 && (
+                  <div className="flex gap-2 mt-2">
+                    {uploadedDocs.dokumen_ktp_ortu.map((url, i) => (
+                      <Badge key={i} variant="secondary">
+                        <FileCheck className="h-3 w-3 mr-1" />
+                        File {i + 1}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Kartu Keluarga *</Label>
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  multiple
+                  onChange={(e) => handleFileUpload(e, 'dokumen_kk')}
+                  disabled={loading}
+                />
+                {uploadedDocs.dokumen_kk.length > 0 && (
+                  <div className="flex gap-2 mt-2">
+                    {uploadedDocs.dokumen_kk.map((url, i) => (
+                      <Badge key={i} variant="secondary">
+                        <FileCheck className="h-3 w-3 mr-1" />
+                        File {i + 1}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>SKTM (Surat Keterangan Tidak Mampu) *</Label>
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  multiple
+                  onChange={(e) => handleFileUpload(e, 'dokumen_sktm')}
+                  disabled={loading}
+                />
+                {uploadedDocs.dokumen_sktm.length > 0 && (
+                  <div className="flex gap-2 mt-2">
+                    {uploadedDocs.dokumen_sktm.map((url, i) => (
+                      <Badge key={i} variant="secondary">
+                        <FileCheck className="h-3 w-3 mr-1" />
+                        File {i + 1}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-start gap-2 p-4 border rounded-lg bg-muted/50">
+                <AlertCircle className="h-5 w-5 text-muted-foreground mt-0.5" />
+                <div className="text-sm text-muted-foreground">
+                  <p className="font-medium mb-1">Pernyataan:</p>
+                  <p>
+                    Saya menyatakan bahwa semua data yang disampaikan adalah benar dan dapat 
+                    dipertanggungjawabkan. Saya bersedia beasiswa dicabut jika terbukti memberikan 
+                    data palsu.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Navigation Buttons */}
+          <div className="flex justify-between pt-6">
+            {step > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setStep(step - 1)}
+              >
+                <ChevronLeft className="mr-2 h-4 w-4" />
+                Sebelumnya
+              </Button>
+            )}
+            
+            {step < 4 ? (
+              <Button
+                type="button"
+                onClick={() => setStep(step + 1)}
+                className="ml-auto"
+                disabled={
+                  (step === 1 && !formData.santri_id) ||
+                  (step === 1 && !formData.periode_mulai) ||
+                  (step === 3 && !formData.alasan_pengajuan) ||
+                  (step === 3 && !formData.kondisi_ekonomi_keluarga)
+                }
+              >
+                Selanjutnya
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={handleSubmit}
+                disabled={loading || uploadedDocs.dokumen_ktp_ortu.length === 0 || uploadedDocs.dokumen_kk.length === 0}
+                className="ml-auto"
+              >
+                {loading ? 'Mengirim...' : 'Kirim Pengajuan'}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default PengajuanBeasiswa;
+

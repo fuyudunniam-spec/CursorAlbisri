@@ -22,6 +22,7 @@ const DialogOverlay = React.forwardRef<
       "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className,
     )}
+    aria-hidden="true"
     {...props}
   />
 ));
@@ -37,26 +38,78 @@ const DialogContent = React.forwardRef<
     const contentElement = contentRef.current;
     if (!contentElement) return;
 
+    // More aggressive approach to fix aria-hidden issues
+    const fixAriaHiddenIssues = () => {
+      // Remove all aria-hidden attributes from dialog and its children
+      const allElements = contentElement.querySelectorAll('*');
+      allElements.forEach((element) => {
+        const htmlElement = element as HTMLElement;
+        if (htmlElement.getAttribute('aria-hidden') === 'true') {
+          htmlElement.removeAttribute('aria-hidden');
+        }
+      });
+      
+      // Ensure dialog content itself is not aria-hidden
+      contentElement.removeAttribute('aria-hidden');
+      
+      // Use inert attribute instead for better accessibility
+      if (contentElement.getAttribute('data-state') === 'closed') {
+        contentElement.setAttribute('inert', '');
+      } else {
+        contentElement.removeAttribute('inert');
+      }
+    };
+
     // Monitor dialog state changes
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
-          const isOpen = contentElement.getAttribute('data-state') === 'open';
-          if (isOpen) {
-            // Ensure aria-hidden is removed when dialog is open
-            contentElement.removeAttribute('aria-hidden');
-          }
+          fixAriaHiddenIssues();
         }
       });
+      
+      // Also fix any aria-hidden attributes that get added
+      if (mutation.type === 'attributes' && mutation.attributeName === 'aria-hidden') {
+        const target = mutation.target as HTMLElement;
+        if (target.getAttribute('aria-hidden') === 'true' && 
+            (target === contentElement || contentElement.contains(target))) {
+          target.removeAttribute('aria-hidden');
+        }
+      }
     });
 
     observer.observe(contentElement, {
       attributes: true,
-      attributeFilter: ['data-state', 'aria-hidden']
+      attributeFilter: ['data-state', 'aria-hidden'],
+      subtree: true
     });
+
+    // Initial fix
+    fixAriaHiddenIssues();
+
+    // Monitor focus events
+    const handleFocusIn = (e: FocusEvent) => {
+      const focusedElement = e.target as HTMLElement;
+      let currentElement = focusedElement;
+      
+      // Remove aria-hidden from all ancestors
+      while (currentElement && currentElement !== document.body) {
+        if (currentElement.getAttribute('aria-hidden') === 'true') {
+          currentElement.removeAttribute('aria-hidden');
+        }
+        currentElement = currentElement.parentElement as HTMLElement;
+      }
+    };
+
+    contentElement.addEventListener('focusin', handleFocusIn);
+
+    // Periodic check to ensure aria-hidden issues don't persist
+    const interval = setInterval(fixAriaHiddenIssues, 100);
 
     return () => {
       observer.disconnect();
+      contentElement.removeEventListener('focusin', handleFocusIn);
+      clearInterval(interval);
     };
   }, []);
 
@@ -76,17 +129,27 @@ const DialogContent = React.forwardRef<
           "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className,
         )}
+        aria-describedby={undefined}
         onOpenAutoFocus={(e) => {
-          // Prevent auto focus to avoid aria-hidden conflicts
           e.preventDefault();
-          // Manually focus the first focusable element after a short delay
+          
           // Use requestAnimationFrame to ensure DOM is ready
           requestAnimationFrame(() => {
             const dialogElement = contentRef.current;
             if (dialogElement) {
+              // Remove all aria-hidden attributes
+              dialogElement.removeAttribute('aria-hidden');
+              const allElements = dialogElement.querySelectorAll('*');
+              allElements.forEach((element) => {
+                const htmlElement = element as HTMLElement;
+                htmlElement.removeAttribute('aria-hidden');
+              });
+              
+              // Focus first focusable element
               const focusableElements = dialogElement.querySelectorAll(
                 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
               );
+              
               if (focusableElements.length > 0) {
                 (focusableElements[0] as HTMLElement).focus();
               }
@@ -94,7 +157,6 @@ const DialogContent = React.forwardRef<
           });
         }}
         onCloseAutoFocus={(e) => {
-          // Prevent auto focus on close to avoid aria-hidden conflicts
           e.preventDefault();
         }}
         {...props}

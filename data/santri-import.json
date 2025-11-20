@@ -1,0 +1,159 @@
+[
+  {
+    "nama_lengkap": "MOH NASSA FIOI KAUTSAR",
+    "nis": "NASA",
+    "jenis_kelamin": "L",
+    "tempat_lahir": "LAMONGAN",
+    "tanggal_lahir": "2010-12-06",
+    "alamat": "Waru Lor 004/003, Paciran.",
+    "no_whatsapp": "62 831-3305-5205",
+    "kategori": "Binaan Mukim",
+    "status_sosial": "Dhuafa",
+    "tipe_pembayaran": "Beasiswa",
+    "status_approval": "disetujui",
+    "nama_sekolah": "",
+    "ipk_terakhir": "",
+    "tahun_lulus": "",
+    "ukuran_seragam": "",
+    "tahun_masuk": "",
+    "wali_data": [],
+    "dokumen_data": [],
+    "created_at": "2025-10-15T10:32:08.732Z",
+    "updated_at": "2025-10-15T10:32:08.732Z"
+  },
+  {
+    "nama_lengkap": "IVANA FAUZUN NAJAH",
+    "nis": "VANA",
+    "jenis_kelamin": "P",
+    "tempat_lahir": "LAMONGAN",
+    "tanggal_lahir": " 2008- JANUARI -16 ",
+    "alamat": "sebelah selatan masjid mathlabul huda RT03/RW03",
+    "no_whatsapp": "087757432430",
+    "kategori": "Binaan Mukim",
+    "status_sosial": "Dhuafa",
+    "tipe_pembayaran": "Beasiswa",
+    "status_approval": "disetujui",
+    "nama_sekolah": "SMP AL ISLAH SURABAYA",
+    "ipk_terakhir": "91",
+    "tahun_lulus": "2021",
+    "ukuran_seragam": "XL",
+    "tahun_masuk": "2023",
+    "wali_data": [
+      {
+        "nama_lengkap": "MINANUR ROHMAN",
+        "hubungan_keluarga": "Orang Tua",
+        "jenis_kelamin": "",
+        "tempat_lahir": "",
+        "tanggal_lahir": null,
+        "alamat": "",
+        "no_whatsapp": "",
+        "pekerjaan": "",
+        "pendidikan_terakhir": "",
+        "penghasilan_bulanan": "",
+        "tinggal_bersama": false,
+        "siap_dipanggil": false,
+        "is_utama": true
+      },
+      {
+        "nama_lengkap": "MUHIZATUNNIKMAH",
+        "hubungan_keluarga": "Keluarga",
+        "jenis_kelamin": "",
+        "tempat_lahir": "",
+        "tanggal_lahir": null,
+        "alamat": "",
+        "no_whatsapp": "",
+        "pekerjaan": "",
+        "pendidikan_terakhir": "",
+        "penghasilan_bulanan": "",
+        "tinggal_bersama": false,
+        "siap_dipanggil": false,
+        "is_utama": false
+      }
+    ],
+    "dokumen_data": [
+      {
+        "jenis_dokumen": "Kartu Keluarga",
+        "nama_file": "open?id=1OYxxA4jiiBc3ok1R61ezcRYU43I47xGi",
+        "url_file": "https://drive.google.com/open?id=1OYxxA4jiiBc3ok1R61ezcRYU43I47xGi",
+        "status_verifikasi": "belum_diverifikasi",
+        "created_at": "2025-10-15T10:32:08.733Z"
+      },
+      {
+        "jenis_dokumen": "Ijazah Terakhir",
+        "nama_file": "open?id=1lyMuDcu2MxEnjRiXn0jw9W_h7jyrOw-6",
+        "url_file": "https://drive.google.com/open?id=1lyMuDcu2MxEnjRiXn0jw9W_h7jyrOw-6",
+        "status_verifikasi": "belum_diverifikasi",
+        "created_at": "2025-10-15T10:32:08.733Z"
+      },
+      {
+        "jenis_dokumen": "Transkrip Nilai",
+        "nama_file": "open?id=1aOA2UQByMg_3gbA_xnr8qFSPPWvRLBFo",
+        "url_file": "https://drive.google.com/open?id=1aOA2UQByMg_3gbA_xnr8qFSPPWvRLBFo",
+        "status_verifikasi": "belum_diverifikasi",
+        "created_at": "2025-10-15T10:32:08.733Z"
+      },
+      {
+        "jenis_dokumen": "KTP Orang Tua/Wali",
+        "nama_file": "open?id=1pvlJShXdhYiZdOWwTpTKB6IbFuWnMSnA",
+        "url_file": "https://drive.google.com/open?id=1pvlJShXdhYiZdOWwTpTKB6IbFuWnMSnA",
+        "status_verifikasi": "belum_diverifikasi",
+        "created_at": "2025-10-15T10:32:08.733Z"
+      }
+    ],
+    "created_at": "2025-10-15T10:32:08.733Z",
+    "updated_at": "2025-10-15T10:32:08.733Z"
+  },
+  {
+    "nama_lengkap": "GANDARI FEBYANA SYARASWATI",
+    "nis": "FEBY",
+    "jenis_kelamin": "P",
+    "tempat_lahir": "JAKARTA",
+    "tanggal_lahir": null,
+    "alamat": "Perum Gunung Anyar Emas blok J2 no.205",
+    "no_whatsapp": "082140392304",
+    "kategori": "Binaan Mukim",
+    "status_sosial": "Dhuafa",
+    "tipe_pembayaran": "Beasiswa",
+    "status_approval": "disetujui",
+    "nama_sekolah": "SMP PESANTREN TEMULUS",
+    "ipk_terakhir": "84",
+    "tahun_lulus": "2022",
+    "ukuran_seragam": "L",
+    "tahun_masuk": "2023",
+    "wali_data": [
+      {
+        "nama_lengkap": "SUPARNI",
+        "hubungan_keluarga": "Orang Tua",
+        "jenis_kelamin": "",
+        "tempat_lahir": "",
+        "tanggal_lahir": null,
+        "alamat": "",
+        "no_whatsapp": "",
+        "pekerjaan": "",
+        "pendidikan_terakhir": "",
+        "penghasilan_bulanan": "",
+        "tinggal_bersama": false,
+        "siap_dipanggil": false,
+        "is_utama": true
+      },
+      {
+        "nama_lengkap": "SUNARSIH MARGO MURDIANTO",
+        "hubungan_keluarga": "Keluarga",
+        "jenis_kelamin": "",
+        "tempat_lahir": "",
+        "tanggal_lahir": null,
+        "alamat": "",
+        "no_whatsapp": "",
+        "pekerjaan": "",
+        "pendidikan_terakhir": "",
+        "penghasilan_bulanan": "",
+        "tinggal_bersama": false,
+        "siap_dipanggil": false,
+        "is_utama": false
+      }
+    ],
+    "dokumen_data": [],
+    "created_at": "2025-10-15T10:32:08.733Z",
+    "updated_at": "2025-10-15T10:32:08.733Z"
+  }
+]

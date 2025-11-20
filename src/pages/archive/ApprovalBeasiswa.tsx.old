@@ -1,0 +1,605 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { 
+  Search, 
+  Eye, 
+  CheckCircle, 
+  XCircle,
+  Clock,
+  User,
+  FileText,
+  DollarSign,
+  Calendar,
+  Filter,
+  Crown,
+  TrendingUp,
+  TrendingDown
+} from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+interface PengajuanBeasiswa {
+  id: string;
+  santri_id: string;
+  jenis_beasiswa: string;
+  persentase_beasiswa: number;
+  persentase_rekomendasi?: number;
+  komponen_tercover: string[];
+  status: 'draft' | 'pending' | 'diverifikasi' | 'disetujui' | 'ditolak' | 'dicabut';
+  alasan_pengajuan: string;
+  dokumen_pendukung: string[];
+  created_at: string;
+  verified_at?: string;
+  verified_by?: string;
+  catatan_verifikasi?: string;
+  approved_at?: string;
+  approved_by?: string;
+  catatan_approval?: string;
+  // Santri info
+  santri?: {
+    nama_lengkap: string;
+    nis: string;
+    kelas: string;
+    program_id?: string;
+    program?: {
+      nama_program: string;
+      kode_program: string;
+    };
+  };
+}
+
+const ApprovalBeasiswa: React.FC = () => {
+  const [pengajuan, setPengajuan] = useState<PengajuanBeasiswa[]>([]);
+  const [selectedPengajuan, setSelectedPengajuan] = useState<PengajuanBeasiswa | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('diverifikasi');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [approvalNote, setApprovalNote] = useState('');
+  const [persentaseFinal, setPersentaseFinal] = useState('');
+
+  useEffect(() => {
+    fetchPengajuan();
+  }, []);
+
+  const fetchPengajuan = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('pengajuan_beasiswa_santri')
+        .select(`
+          *,
+          santri:santri_id (
+            nama_lengkap,
+            nis,
+            kelas,
+            program_id,
+            program:program_id (
+              nama_program,
+              kode_program
+            )
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPengajuan(data || []);
+    } catch (error: any) {
+      toast.error('Gagal memuat pengajuan: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApproval = async (pengajuanId: string, status: 'disetujui' | 'ditolak') => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const updateData: any = {
+        status,
+        approved_at: new Date().toISOString(),
+        approved_by: user?.id
+      };
+
+      // Add persentase_approved if approved and percentage is provided
+      if (status === 'disetujui' && persentaseFinal) {
+        updateData.persentase_approved = parseInt(persentaseFinal);
+      }
+
+      // Add catatan_approval if provided
+      if (approvalNote && approvalNote.trim()) {
+        updateData.catatan_approval = approvalNote.trim();
+      }
+
+      const { error } = await supabase
+        .from('pengajuan_beasiswa_santri')
+        .update(updateData)
+        .eq('id', pengajuanId);
+
+      if (error) {
+        console.error('Approval error:', error);
+        throw error;
+      }
+
+      toast.success(`Pengajuan berhasil ${status === 'disetujui' ? 'disetujui' : 'ditolak'}`);
+      setDialogOpen(false);
+      setApprovalNote('');
+      setPersentaseFinal('');
+      fetchPengajuan();
+    } catch (error: any) {
+      console.error('Approval error:', error);
+      toast.error('Gagal memproses approval: ' + error.message);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants = {
+      draft: { variant: 'secondary' as const, icon: Clock, text: 'Draft' },
+      pending: { variant: 'secondary' as const, icon: Clock, text: 'Menunggu Verifikasi' },
+      diverifikasi: { variant: 'default' as const, icon: CheckCircle, text: 'Siap Approval' },
+      disetujui: { variant: 'default' as const, icon: CheckCircle, text: 'Disetujui' },
+      ditolak: { variant: 'destructive' as const, icon: XCircle, text: 'Ditolak' },
+      dicabut: { variant: 'secondary' as const, icon: XCircle, text: 'Dicabut' }
+    };
+    
+    const config = variants[status as keyof typeof variants] || variants.pending;
+    const Icon = config.icon;
+    
+    return (
+      <Badge variant={config.variant} className="flex items-center gap-1">
+        <Icon className="h-3 w-3" />
+        {config.text}
+      </Badge>
+    );
+  };
+
+  const filteredPengajuan = pengajuan.filter(p => {
+    const matchesSearch = 
+      p.santri?.nama_lengkap.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.santri?.nisn.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.jenis_beasiswa.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+    
+    return matchesSearch && matchesStatus;
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">Memuat pengajuan...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Crown className="h-8 w-8 text-yellow-600" />
+            Approval Beasiswa
+          </h1>
+          <p className="text-muted-foreground">Persetujuan final pengajuan beasiswa oleh pimpinan</p>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-blue-600" />
+              <span className="text-sm text-muted-foreground">Menunggu Approval</span>
+            </div>
+            <p className="text-2xl font-bold text-blue-600">
+              {pengajuan.filter(p => p.status === 'diverifikasi').length}
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              <span className="text-sm text-muted-foreground">Disetujui</span>
+            </div>
+            <p className="text-2xl font-bold text-green-600">
+              {pengajuan.filter(p => p.status === 'disetujui').length}
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <XCircle className="h-4 w-4 text-red-600" />
+              <span className="text-sm text-muted-foreground">Ditolak</span>
+            </div>
+            <p className="text-2xl font-bold text-red-600">
+              {pengajuan.filter(p => p.status === 'ditolak').length}
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-4 w-4 text-purple-600" />
+              <span className="text-sm text-muted-foreground">Total Pengajuan</span>
+            </div>
+            <p className="text-2xl font-bold text-purple-600">
+              {pengajuan.length}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Cari nama santri, NIS, atau jenis beasiswa..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Filter Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Semua Status</SelectItem>
+            <SelectItem value="diverifikasi">Siap Approval</SelectItem>
+            <SelectItem value="disetujui">Disetujui</SelectItem>
+            <SelectItem value="ditolak">Ditolak</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Daftar Pengajuan untuk Approval
+          </CardTitle>
+          <CardDescription>
+            {filteredPengajuan.length} pengajuan ditemukan
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Santri</TableHead>
+                <TableHead>Program</TableHead>
+                <TableHead>Jenis Beasiswa</TableHead>
+                <TableHead>Coverage</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Tanggal</TableHead>
+                <TableHead>Aksi</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredPengajuan.map((peng) => (
+                <TableRow key={peng.id}>
+                  <TableCell>
+                    <div>
+                      <p className="font-semibold">{peng.santri?.nama_lengkap}</p>
+                      <p className="text-sm text-muted-foreground">NISN: {peng.santri?.nisn}</p>
+                      <p className="text-sm text-muted-foreground">Kelas: {peng.santri?.kelas}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div>
+                      <p className="font-medium">{peng.santri?.program?.nama_program}</p>
+                      <p className="text-sm text-muted-foreground">{peng.santri?.program?.kode_program}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{peng.jenis_beasiswa}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-4 w-4 text-primary" />
+                      <span className="font-semibold">{peng.persentase_beasiswa}%</span>
+                      {peng.persentase_rekomendasi && peng.persentase_rekomendasi !== peng.persentase_beasiswa && (
+                        <div className="flex items-center gap-1">
+                          {peng.persentase_rekomendasi > peng.persentase_beasiswa ? (
+                            <TrendingUp className="h-3 w-3 text-green-600" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3 text-red-600" />
+                          )}
+                          <span className="text-xs text-muted-foreground">
+                            → {peng.persentase_rekomendasi}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {peng.komponen_tercover ? peng.komponen_tercover.length : 0} komponen
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    {getStatusBadge(peng.status)}
+                  </TableCell>
+                  <TableCell>
+                    <div>
+                      <p className="text-sm">{new Date(peng.created_at).toLocaleDateString('id-ID')}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(peng.created_at).toLocaleTimeString('id-ID')}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedPengajuan(peng)}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          Detail
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle className="flex items-center gap-2">
+                            <Crown className="h-5 w-5 text-yellow-600" />
+                            Detail Approval Beasiswa
+                          </DialogTitle>
+                          <DialogDescription>
+                            Evaluasi dan keputusan final pengajuan beasiswa
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        {selectedPengajuan && (
+                          <div className="space-y-6">
+                            {/* Santri Info */}
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                  <User className="h-5 w-5" />
+                                  Informasi Santri
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <Label>Nama Lengkap</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.nama_lengkap}</p>
+                                </div>
+                                <div>
+                                  <Label>NISN</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.nisn}</p>
+                                </div>
+                                <div>
+                                  <Label>Kelas</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.kelas}</p>
+                                </div>
+                                <div>
+                                  <Label>Program</Label>
+                                  <p className="font-semibold">{selectedPengajuan.santri?.program?.nama_program}</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            {/* Beasiswa Details */}
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                  <DollarSign className="h-5 w-5" />
+                                  Detail Beasiswa
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <Label>Jenis Beasiswa</Label>
+                                    <Badge variant="outline" className="mt-1">{selectedPengajuan.jenis_beasiswa}</Badge>
+                                  </div>
+                                  <div>
+                                    <Label>Persentase yang Diajukan</Label>
+                                    <p className="text-2xl font-bold text-primary mt-1">{selectedPengajuan.persentase_beasiswa}%</p>
+                                  </div>
+                                </div>
+                                
+                                {selectedPengajuan.persentase_rekomendasi && (
+                                  <div>
+                                    <Label>Rekomendasi Admin</Label>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-xl font-bold text-blue-600">{selectedPengajuan.persentase_rekomendasi}%</p>
+                                      {selectedPengajuan.persentase_rekomendasi !== selectedPengajuan.persentase_beasiswa && (
+                                        <Badge variant="outline">
+                                          {selectedPengajuan.persentase_rekomendasi > selectedPengajuan.persentase_beasiswa ? 'Naik' : 'Turun'}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                <div>
+                                  <Label>Komponen Tercover</Label>
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    {selectedPengajuan.komponen_tercover && selectedPengajuan.komponen_tercover.length > 0 ? (
+                                      selectedPengajuan.komponen_tercover.map((komponen, idx) => (
+                                        <Badge key={idx} variant="secondary">{komponen}</Badge>
+                                      ))
+                                    ) : (
+                                      <p className="text-muted-foreground">Tidak ada komponen yang didefinisikan</p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <Label>Alasan Pengajuan</Label>
+                                  <p className="mt-1 p-3 bg-muted rounded-lg">{selectedPengajuan.alasan_pengajuan}</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            {/* Verifikasi Info */}
+                            {selectedPengajuan.catatan_verifikasi && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="flex items-center gap-2">
+                                    <CheckCircle className="h-5 w-5" />
+                                    Hasil Verifikasi Admin
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="space-y-2">
+                                    <div>
+                                      <Label>Catatan Verifikasi</Label>
+                                      <p className="mt-1 p-3 bg-muted rounded-lg">{selectedPengajuan.catatan_verifikasi}</p>
+                                    </div>
+                                    {selectedPengajuan.verified_at && (
+                                      <div>
+                                        <Label>Tanggal Verifikasi</Label>
+                                        <p className="font-semibold">
+                                          {new Date(selectedPengajuan.verified_at).toLocaleString('id-ID')}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+
+                            {/* Approval Actions */}
+                            {selectedPengajuan.status === 'diverifikasi' && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="flex items-center gap-2">
+                                    <Crown className="h-5 w-5 text-yellow-600" />
+                                    Keputusan Approval
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div>
+                                    <Label>Persentase Final yang Disetujui (%)</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max="100"
+                                      value={persentaseFinal}
+                                      onChange={(e) => setPersentaseFinal(e.target.value)}
+                                      placeholder={selectedPengajuan.persentase_rekomendasi?.toString() || selectedPengajuan.persentase_beasiswa.toString()}
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      Kosongkan untuk menggunakan persentase yang diajukan ({selectedPengajuan.persentase_beasiswa}%)
+                                    </p>
+                                  </div>
+                                  
+                                  <div>
+                                    <Label>Catatan Approval</Label>
+                                    <Textarea
+                                      value={approvalNote}
+                                      onChange={(e) => setApprovalNote(e.target.value)}
+                                      placeholder="Tambahkan catatan approval..."
+                                      rows={3}
+                                    />
+                                  </div>
+                                  
+                                  <div className="flex gap-2">
+                                    <Button
+                                      onClick={() => handleApproval(selectedPengajuan.id, 'ditolak')}
+                                      variant="destructive"
+                                      className="flex-1"
+                                    >
+                                      <XCircle className="h-4 w-4 mr-2" />
+                                      Tolak Pengajuan
+                                    </Button>
+                                    <Button
+                                      onClick={() => handleApproval(selectedPengajuan.id, 'disetujui')}
+                                      className="flex-1"
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-2" />
+                                      Setujui Pengajuan
+                                    </Button>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+
+                            {/* Approval Status Info */}
+                            {selectedPengajuan.status !== 'diverifikasi' && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Status Approval</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      {getStatusBadge(selectedPengajuan.status)}
+                                    </div>
+                                    {selectedPengajuan.catatan_approval && (
+                                      <div>
+                                        <Label>Catatan Approval</Label>
+                                        <p className="mt-1 p-3 bg-muted rounded-lg">{selectedPengajuan.catatan_approval}</p>
+                                      </div>
+                                    )}
+                                    {selectedPengajuan.approved_at && (
+                                      <div>
+                                        <Label>Tanggal Approval</Label>
+                                        <p className="font-semibold">
+                                          {new Date(selectedPengajuan.approved_at).toLocaleString('id-ID')}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+                          </div>
+                        )}
+                      </DialogContent>
+                    </Dialog>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          {filteredPengajuan.length === 0 && (
+            <div className="text-center py-12">
+              <Crown className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-muted-foreground">Tidak ada pengajuan untuk approval</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default ApprovalBeasiswa;
