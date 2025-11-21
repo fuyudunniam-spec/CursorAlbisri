@@ -4,13 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Package, Trash2 } from 'lucide-react';
+import { Package } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MultiItemSalePayload } from '@/types/inventaris.types';
 import {
-  validateSalesForm,
   showValidationError,
-  showStockWarning,
   showSuccess,
   showLoading,
   ValidationError,
@@ -18,17 +16,9 @@ import {
   DatabaseError,
   FinancialError
 } from '@/utils/inventaris-error-handling';
-
-// Types for form state
-type FormItem = {
-  tempId: string;
-  item_id: string;
-  nama_barang: string;
-  jumlah: number;
-  harga_dasar: number;
-  sumbangan: number;
-  stok_tersedia: number;
-};
+import TotalSummary from './TotalSummary';
+import ItemList from './ItemList';
+import type { FormItem } from './ItemRow';
 
 type FormData = {
   pembeli: string;
@@ -153,12 +143,7 @@ const MultiItemSalesForm: React.FC<MultiItemSalesFormProps> = ({
     return { total_harga_dasar, total_sumbangan, grand_total };
   };
 
-  /**
-   * Calculate subtotal for a single item
-   */
-  const calculateItemSubtotal = (item: FormItem) => {
-    return (item.harga_dasar * item.jumlah) + item.sumbangan;
-  };
+
 
   // ============================================================================
   // Form Validation and Submission
@@ -365,126 +350,20 @@ const MultiItemSalesForm: React.FC<MultiItemSalesFormProps> = ({
           </div>
 
           {/* Items List */}
-          {formData.items.length > 0 ? (
-            <div className="border rounded-lg overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left p-3 font-medium">Item</th>
-                      <th className="text-left p-3 font-medium">Jumlah</th>
-                      <th className="text-left p-3 font-medium">Harga Dasar/Unit</th>
-                      <th className="text-left p-3 font-medium">Sumbangan</th>
-                      <th className="text-left p-3 font-medium">Subtotal</th>
-                      <th className="text-left p-3 font-medium">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {formData.items.map((item) => {
-                      const subtotal = calculateItemSubtotal(item);
-                      const hasStockIssue = item.jumlah > item.stok_tersedia;
-                      
-                      return (
-                        <tr key={item.tempId} className="border-t">
-                          <td className="p-3">
-                            <div className="font-medium">{item.nama_barang}</div>
-                            <div className="text-sm text-muted-foreground">
-                              Stok: {item.stok_tersedia}
-                            </div>
-                          </td>
-                          <td className="p-3">
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.jumlah}
-                              onChange={(e) => updateItem(item.tempId, { 
-                                jumlah: parseInt(e.target.value) || 0 
-                              })}
-                              className={`w-24 ${hasStockIssue ? 'border-red-500' : ''}`}
-                            />
-                            {hasStockIssue && (
-                              <p className="text-xs text-red-600 mt-1">Melebihi stok</p>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            <Input
-                              type="number"
-                              min="0"
-                              value={item.harga_dasar}
-                              onChange={(e) => updateItem(item.tempId, { 
-                                harga_dasar: parseFloat(e.target.value) || 0 
-                              })}
-                              className="w-32"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <Input
-                              type="number"
-                              min="0"
-                              value={item.sumbangan}
-                              onChange={(e) => updateItem(item.tempId, { 
-                                sumbangan: parseFloat(e.target.value) || 0 
-                              })}
-                              className="w-32"
-                            />
-                          </td>
-                          <td className="p-3 font-medium">
-                            Rp {Math.round(subtotal).toLocaleString('id-ID')}
-                          </td>
-                          <td className="p-3">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600"
-                              onClick={() => removeItem(item.tempId)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground border rounded-lg">
-              <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Belum ada item yang ditambahkan</p>
-              <p className="text-sm">Pilih item dari dropdown di atas untuk menambahkan</p>
-            </div>
-          )}
+          <ItemList
+            items={formData.items}
+            onUpdateItem={updateItem}
+            onRemoveItem={removeItem}
+          />
 
           {/* Total Summary */}
           {formData.items.length > 0 && (
-            <Card className="bg-muted/50">
-              <CardHeader>
-                <CardTitle className="text-sm">Ringkasan Total</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Total Harga Dasar:</span>
-                    <span>Rp {Math.round(totals.total_harga_dasar).toLocaleString('id-ID')}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Total Sumbangan:</span>
-                    <span>Rp {Math.round(totals.total_sumbangan).toLocaleString('id-ID')}</span>
-                  </div>
-                  <div className="flex justify-between font-medium border-t pt-2 text-lg">
-                    <span>Grand Total:</span>
-                    <span className="text-green-600">
-                      Rp {Math.round(totals.grand_total).toLocaleString('id-ID')}
-                    </span>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    {formData.items.length} item dalam transaksi ini
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <TotalSummary 
+              totals={{
+                ...totals,
+                itemCount: formData.items.length
+              }}
+            />
           )}
 
           {/* Form Actions */}
