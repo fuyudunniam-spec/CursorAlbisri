@@ -240,21 +240,34 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            Pondok Sukses
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Sistem Manajemen Pondok Pesantren
-          </p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-6">
+        {/* Logo and Header Section */}
+        <div className="text-center space-y-4">
+          {/* Logo - Large on desktop, proportional on mobile */}
+          <div className="flex justify-center">
+            <img 
+              src="/kop-albisri.png" 
+              alt="Logo Pesantren Al-Bisri" 
+              className="h-24 w-auto sm:h-32 md:h-40 object-contain"
+            />
+          </div>
+          
+          {/* Welcome Text */}
+          <div className="space-y-2">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-800 tracking-tight">
+              Selamat Datang di E-Maktab
+            </h1>
+            <h2 className="text-xl sm:text-2xl font-semibold text-slate-700">
+              Pesantren Anak Yatim Al-Bisri
+            </h2>
+          </div>
         </div>
 
         <Tabs defaultValue="login" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="login">Masuk</TabsTrigger>
-            <TabsTrigger value="register">Daftar</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 bg-slate-100">
+            <TabsTrigger value="login" className="data-[state=active]:bg-white">Masuk</TabsTrigger>
+            <TabsTrigger value="register" className="data-[state=active]:bg-white">Daftar</TabsTrigger>
           </TabsList>
 
           {error && (
@@ -264,48 +277,56 @@ export default function Auth() {
           )}
 
           {success && (
-            <Alert className="mt-4">
-              <AlertDescription>{success}</AlertDescription>
+            <Alert className="mt-4 bg-green-50 border-green-200">
+              <AlertDescription className="text-green-800">{success}</AlertDescription>
             </Alert>
           )}
 
           <TabsContent value="login">
-            <Card>
-              <CardHeader>
-                <CardTitle>Masuk ke Akun</CardTitle>
-                <CardDescription>
+            <Card className="border-slate-200 shadow-lg">
+              <CardHeader className="space-y-1 pb-4">
+                <CardTitle className="text-xl font-semibold text-slate-800">Masuk ke Akun</CardTitle>
+                <CardDescription className="text-slate-600">
                   Masukkan email dan password Anda
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="login-email">ID Santri atau Email</Label>
+                    <Label htmlFor="login-email" className="text-slate-700 font-medium">ID Santri atau Email</Label>
                     <Input
                       id="login-email"
                       type="text"
-                      placeholder="Masukkan ID Santri (contoh: BM240001) atau Email"
+                      placeholder="admin@gmail.com"
                       value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value.toUpperCase())}
+                      onChange={(e) => setLoginEmail(e.target.value)}
                       required
                       disabled={isLoading}
+                      className="border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                      style={{ textTransform: 'none' }}
                     />
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-slate-500">
                       Santri: gunakan ID Santri Anda. Admin/Staff: gunakan email.
                     </p>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="login-password">Password</Label>
+                    <Label htmlFor="login-password" className="text-slate-700 font-medium">Password</Label>
                     <Input
                       id="login-password"
                       type="password"
+                      placeholder="••••••••"
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
                       required
                       disabled={isLoading}
+                      className="border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={isLoading}>
+                  <Button 
+                    type="submit" 
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 transition-colors" 
+                    disabled={isLoading}
+                  >
                     {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Masuk
                   </Button>
@@ -315,60 +336,75 @@ export default function Auth() {
           </TabsContent>
 
           <TabsContent value="register">
-            <Card>
-              <CardHeader>
-                <CardTitle>Daftar Akun Baru</CardTitle>
-                <CardDescription>
+            <Card className="border-slate-200 shadow-lg">
+              <CardHeader className="space-y-1 pb-4">
+                <CardTitle className="text-xl font-semibold text-slate-800">Daftar Akun Baru</CardTitle>
+                <CardDescription className="text-slate-600">
                   Buat akun baru untuk mengakses sistem
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleRegister} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="register-fullname">Nama Lengkap</Label>
+                    <Label htmlFor="register-fullname" className="text-slate-700 font-medium">Nama Lengkap</Label>
                     <Input
                       id="register-fullname"
                       type="text"
+                      placeholder="Masukkan nama lengkap"
                       value={registerFullName}
                       onChange={(e) => setRegisterFullName(e.target.value)}
                       required
                       disabled={isLoading}
+                      className="border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                      style={{ textTransform: 'none' }}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="register-email">Email</Label>
+                    <Label htmlFor="register-email" className="text-slate-700 font-medium">Email</Label>
                     <Input
                       id="register-email"
                       type="email"
+                      placeholder="nama@email.com"
                       value={registerEmail}
                       onChange={(e) => setRegisterEmail(e.target.value)}
                       required
                       disabled={isLoading}
+                      className="border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                      style={{ textTransform: 'none' }}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="register-phone">No. Telepon</Label>
+                    <Label htmlFor="register-phone" className="text-slate-700 font-medium">No. Telepon</Label>
                     <Input
                       id="register-phone"
                       type="tel"
+                      placeholder="08xxxxxxxxxx"
                       value={registerPhone}
                       onChange={(e) => setRegisterPhone(e.target.value)}
                       disabled={isLoading}
+                      className="border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                      style={{ textTransform: 'none' }}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="register-password">Password</Label>
+                    <Label htmlFor="register-password" className="text-slate-700 font-medium">Password</Label>
                     <Input
                       id="register-password"
                       type="password"
+                      placeholder="Minimal 6 karakter"
                       value={registerPassword}
                       onChange={(e) => setRegisterPassword(e.target.value)}
                       required
                       minLength={6}
                       disabled={isLoading}
+                      className="border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={isLoading}>
+                  <Button 
+                    type="submit" 
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 transition-colors" 
+                    disabled={isLoading}
+                  >
                     {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Daftar
                   </Button>

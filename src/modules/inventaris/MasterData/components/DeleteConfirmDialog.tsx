@@ -2,38 +2,17 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, X } from 'lucide-react';
-import { deleteInventoryItem } from '@/services/inventaris.service';
-import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 
 interface DeleteConfirmDialogProps {
   item: any;
+  isOpen: boolean;
+  isDeleting: boolean;
   onClose: () => void;
+  onConfirm: () => void;
 }
 
-const DeleteConfirmDialog = ({ item, onClose }: DeleteConfirmDialogProps) => {
-  const [isDeleting, setIsDeleting] = React.useState(false);
-  const queryClient = useQueryClient();
-
-  const handleDelete = async () => {
-    setIsDeleting(true);
-    try {
-      await deleteInventoryItem(item.id);
-      
-      // Refresh data
-      queryClient.invalidateQueries({ queryKey: ['inventory-master'] });
-      queryClient.invalidateQueries({ queryKey: ['low-stock'] });
-      queryClient.invalidateQueries({ queryKey: ['near-expiry'] });
-      
-      toast.success('Item berhasil dihapus');
-      onClose();
-    } catch (error) {
-      console.error('Error deleting item:', error);
-      toast.error('Gagal menghapus item');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
+const DeleteConfirmDialog = ({ item, isOpen, isDeleting, onClose, onConfirm }: DeleteConfirmDialogProps) => {
+  if (!isOpen || !item) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -73,14 +52,14 @@ const DeleteConfirmDialog = ({ item, onClose }: DeleteConfirmDialogProps) => {
             <div className="flex gap-2 pt-4">
               <Button 
                 variant="destructive" 
-                onClick={handleDelete}
+                onClick={onConfirm}
                 disabled={isDeleting}
                 className="flex items-center gap-2"
               >
                 <AlertTriangle className="h-4 w-4" />
                 {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
               </Button>
-              <Button variant="outline" onClick={onClose}>
+              <Button variant="outline" onClick={onClose} disabled={isDeleting}>
                 Batal
               </Button>
             </div>

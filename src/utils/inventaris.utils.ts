@@ -254,3 +254,51 @@ export const getContohNamaBarang = (kategori: string): string => {
   return "Contoh: Beras 25kg, Minyak Goreng 2 liter, Indomie Goreng 70gr";
 };
 
+// ============================================================================
+// Multi-Item Sales Calculation Functions
+// ============================================================================
+
+/**
+ * Calculate subtotal for a single item in a multi-item sale
+ * Formula: (harga_dasar × jumlah) + sumbangan
+ * 
+ * @param jumlah - Quantity of items
+ * @param harga_dasar - Base price per unit
+ * @param sumbangan - Additional donation amount
+ * @returns Subtotal for the item
+ */
+export const calculateSubtotal = (
+  jumlah: number,
+  harga_dasar: number,
+  sumbangan: number
+): number => {
+  return (harga_dasar * jumlah) + sumbangan;
+};
+
+/**
+ * Calculate grand total from all items in a multi-item sale
+ * Returns breakdown of total base price, total donations, and grand total
+ * 
+ * @param items - Array of items with quantity, base price, and donation
+ * @returns Object containing total_harga_dasar, total_sumbangan, and grand_total
+ */
+export const calculateGrandTotal = (
+  items: Array<{ jumlah: number; harga_dasar: number; sumbangan: number }>
+): {
+  total_harga_dasar: number;
+  total_sumbangan: number;
+  grand_total: number;
+} => {
+  const total_harga_dasar = items.reduce(
+    (sum, item) => sum + (item.harga_dasar * item.jumlah),
+    0
+  );
+  const total_sumbangan = items.reduce(
+    (sum, item) => sum + item.sumbangan,
+    0
+  );
+  const grand_total = total_harga_dasar + total_sumbangan;
+  
+  return { total_harga_dasar, total_sumbangan, grand_total };
+};
+

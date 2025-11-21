@@ -196,12 +196,18 @@ const DonationReceipt: React.FC<DonationReceiptProps> = ({ donation, onClose }) 
               {donation.items && donation.items.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {donation.items.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center py-1">
-                      <span className="text-gray-700">
+                    <div key={idx} className="flex justify-between items-start py-1">
+                      <span className="text-gray-700 flex-1">
                         • {item.raw_item_name} ({item.quantity} {item.uom})
+                        {item.item_type === 'inventory' && (
+                          <span className="text-xs text-gray-500 ml-2">[Inventaris]</span>
+                        )}
+                        {item.item_type === 'direct_consumption' && (
+                          <span className="text-xs text-gray-500 ml-2">[Makanan]</span>
+                        )}
                       </span>
                       {item.estimated_value && (
-                        <span className="text-gray-600 font-medium">
+                        <span className="text-gray-600 font-medium ml-2">
                           {formatCurrency(item.estimated_value * item.quantity)}
                         </span>
                       )}

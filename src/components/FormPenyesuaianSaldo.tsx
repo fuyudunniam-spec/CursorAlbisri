@@ -87,6 +87,13 @@ const FormPenyesuaianSaldo: React.FC<FormPenyesuaianSaldoProps> = ({ onSuccess }
       const { data: { user } } = await supabase.auth.getUser();
 
       // Call adjustment function
+      console.log('[FormPenyesuaianSaldo] Calling adjust_akun_kas_saldo with:', {
+        p_akun_kas_id: akunKasId,
+        p_saldo_aktual: saldoAktualNum,
+        p_keterangan: keterangan || null,
+        p_user_id: user?.id || null
+      });
+
       const { data, error } = await supabase.rpc('adjust_akun_kas_saldo', {
         p_akun_kas_id: akunKasId,
         p_saldo_aktual: saldoAktualNum,
@@ -94,11 +101,19 @@ const FormPenyesuaianSaldo: React.FC<FormPenyesuaianSaldoProps> = ({ onSuccess }
         p_user_id: user?.id || null
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[FormPenyesuaianSaldo] Error from adjust_akun_kas_saldo:', error);
+        throw error;
+      }
+
+      console.log('[FormPenyesuaianSaldo] Result from adjust_akun_kas_saldo:', data);
 
       if (data && !data.success) {
         throw new Error(data.message || 'Gagal melakukan penyesuaian saldo');
       }
+
+      // Reload akun kas list to get updated balance
+      await loadAkunKas();
 
       // Reset form
       setAkunKasId('');

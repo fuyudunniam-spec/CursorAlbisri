@@ -67,14 +67,8 @@ const SidebarContent = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, canAccess } = useAuth();
-  const [expandedSections, setExpandedSections] = useState<string[]>([
-    'DASHBOARD',
-    'SANTRI',
-    'KEUANGAN',
-    'INVENTARIS',
-    'AKADEMIK',
-    'ADMINISTRASI'
-  ]);
+  // Semua section tertutup by default
+  const [expandedSections, setExpandedSections] = useState<string[]>([]);
 
   // Check feature flag for module dashboards
   const showModuleDashboards = getFeature('MODULE_DASHBOARD_ALPHA');
@@ -279,14 +273,31 @@ const SidebarContent = () => {
 
   return (
     <div className="flex flex-col h-full bg-white border-r border-gray-200">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-200">
-        <h1 className="text-xl font-bold text-gray-900">Al-Bisri</h1>
-        <p className="text-sm text-gray-600">Sistem Manajemen LKSA</p>
+      {/* Header with Logo - Larger, No Card */}
+      <div className="flex-shrink-0 p-6 border-b border-gray-200">
+        <div className="flex flex-col items-center gap-3">
+          {/* Logo Al-Bisri - Lebih Besar */}
+          <div className="flex-shrink-0">
+            <img 
+              src="/kop-albisri.png" 
+              alt="Logo Al-Bisri" 
+              className="w-24 h-24 object-contain"
+            />
+          </div>
+          {/* Text */}
+          <div className="text-center">
+            <h1 className="text-sm font-bold text-gray-900 leading-tight">
+              Pesantren Anak Yatim Al-Bisri
+            </h1>
+            <p className="text-xs text-gray-600 leading-tight mt-1">
+              Sistem Manajemen Pesantren dan LKSA
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+      {/* Navigation with Scroll */}
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400">
         {menuSections.map((section) => {
           const isExpanded = expandedSections.includes(section.title);
           
@@ -348,25 +359,40 @@ const SidebarContent = () => {
         })}
       </nav>
 
-      {/* User Info */}
-      <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center gap-3">
-          <Avatar className="w-8 h-8">
-            <AvatarImage src="" />
-            <AvatarFallback className="bg-primary/10">
-              <UserIcon className="w-4 h-4 text-primary" />
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">
-              {user?.name || user?.email?.split('@')[0] || 'User'}
-            </p>
-            <div className="flex items-center gap-1">
-              <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                {user?.role || 'Unknown'}
-              </Badge>
+      {/* User Info & Logout */}
+      <div className="flex-shrink-0 border-t border-gray-200 bg-gray-50">
+        <div className="p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="w-8 h-8 flex-shrink-0">
+              <AvatarImage src="" />
+              <AvatarFallback className="bg-primary/10">
+                <UserIcon className="w-4 h-4 text-primary" />
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">
+                {user?.name || user?.email?.split('@')[0] || 'User'}
+              </p>
+              <div className="flex items-center gap-1">
+                <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                  {user?.role || 'Unknown'}
+                </Badge>
+              </div>
             </div>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // Get logout function from parent
+              const logoutEvent = new CustomEvent('sidebar-logout');
+              window.dispatchEvent(logoutEvent);
+            }}
+            className="w-full justify-start gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Logout</span>
+          </Button>
         </div>
       </div>
     </div>
@@ -374,9 +400,24 @@ const SidebarContent = () => {
 };
 
 const Layout = ({ children }: LayoutProps) => {
-  const [sidebarOpen, setSidebarOpen] = useState(true); // Desktop default open
+  // Sidebar default: open on desktop, CLOSED on mobile
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024; // lg breakpoint - hanya buka di desktop
+    }
+    return false; // Default closed untuk safety
+  });
   const navigate = useNavigate();
   const { user: authUser, session, logout: handleLogout, loading: authLoading } = useAuth();
+
+  // Listen for logout event from sidebar
+  useEffect(() => {
+    const handleSidebarLogout = () => {
+      handleLogout();
+    };
+    window.addEventListener('sidebar-logout', handleSidebarLogout);
+    return () => window.removeEventListener('sidebar-logout', handleSidebarLogout);
+  }, [handleLogout]);
 
   // Single useEffect for all navigation logic - MUST be called before any early returns
   useEffect(() => {
@@ -395,6 +436,14 @@ const Layout = ({ children }: LayoutProps) => {
 
     return () => clearTimeout(timeoutId);
   }, [authUser, session, authLoading, navigate]);
+
+  // Auto-close sidebar on mobile when location changes
+  const location = useLocation();
+  useEffect(() => {
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false);
+    }
+  }, [location.pathname]);
 
   // All hooks must be called before early returns
   // Show loading only if actually loading (not timeout)
@@ -428,14 +477,17 @@ const Layout = ({ children }: LayoutProps) => {
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
-          <div className="relative flex-1 flex flex-col max-w-xs w-full bg-white">
+          <div 
+            className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity" 
+            onClick={() => setSidebarOpen(false)} 
+          />
+          <div className="fixed inset-y-0 left-0 flex flex-col max-w-xs w-full bg-white shadow-xl h-screen">
             <div className="absolute top-0 right-0 -mr-12 pt-2">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setSidebarOpen(false)}
-                className="text-white"
+                className="text-white hover:bg-white/10"
               >
                 <X className="w-6 h-6" />
               </Button>
@@ -455,41 +507,38 @@ const Layout = ({ children }: LayoutProps) => {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
           <div className="px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mr-2"
+            <div className="flex justify-between items-center h-14 sm:h-16">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-1 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
                 >
-                  <Menu className="w-6 h-6" />
-                </Button>
-                <h2 className="text-lg font-semibold text-gray-900">Dashboard</h2>
+                  <img 
+                    src="/kop-albisri.png" 
+                    alt="Menu" 
+                    className="w-10 h-10 sm:w-12 sm:h-12 object-contain"
+                  />
+                </button>
+                <h1 className="text-sm sm:text-base font-bold text-gray-900">
+                  Pesantren Anak Yatim Al-Bisri
+                </h1>
               </div>
               
-              <div className="flex items-center gap-4">
-                <Badge variant="outline">{authUser?.role || 'Unknown'}</Badge>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleLogout}
-                  className="text-gray-600 hover:text-gray-900"
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Logout
-                </Button>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="hidden sm:inline-flex text-xs">
+                  {authUser?.role || 'Unknown'}
+                </Badge>
               </div>
             </div>
           </div>
         </div>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="py-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <main className="flex-1 overflow-y-auto bg-gray-50">
+          <div className="py-4 sm:py-6">
+            <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
               {children}
             </div>
           </div>

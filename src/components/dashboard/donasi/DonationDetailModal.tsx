@@ -205,25 +205,26 @@ const DonationDetailModal: React.FC<DonationDetailModalProps> = ({
                     <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            {item.item_type === 'inventory' ? (
-                              <Box className="h-4 w-4 text-orange-600" />
-                            ) : item.item_type === 'direct_consumption' ? (
-                              <Utensils className="h-4 w-4 text-red-600" />
-                            ) : null}
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <span className="text-sm font-medium text-gray-900">{item.raw_item_name}</span>
+                            {item.item_type === 'inventory' ? (
+                              <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs px-2 py-0.5 flex items-center gap-1">
+                                <Box className="h-3 w-3" />
+                                Inventaris
+                              </Badge>
+                            ) : item.item_type === 'direct_consumption' ? (
+                              <Badge className="bg-red-100 text-red-700 border-red-200 text-xs px-2 py-0.5 flex items-center gap-1">
+                                <Utensils className="h-3 w-3" />
+                                Makanan
+                              </Badge>
+                            ) : null}
                             {item.is_posted_to_stock && (
                               <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
                                 ✓ Di Gudang
                               </Badge>
                             )}
-                            {item.item_type === 'direct_consumption' && (
-                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
-                                Langsung Konsumsi
-                              </Badge>
-                            )}
                           </div>
-                          <div className="text-xs text-gray-600 ml-6">
+                          <div className="text-xs text-gray-600">
                             Jumlah: {item.quantity} {item.uom}
                             {item.estimated_value && (
                               <span className="ml-2">• Nilai: {formatCurrency(item.estimated_value * item.quantity)}</span>

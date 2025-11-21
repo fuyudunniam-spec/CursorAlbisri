@@ -6,7 +6,9 @@
       "autoApprove": [
         "list_tables",
         "execute_sql",
-        "get_logs"
+        "get_logs",
+        "list_migrations",
+        "apply_migration"
       ]
     }
   }

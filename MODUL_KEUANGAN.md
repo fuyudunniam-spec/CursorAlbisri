@@ -803,13 +803,156 @@ SELECT calculate_saldo_akun('Kas Utama');
 
 ---
 
+## 🔄 Auto-Posting dari Modul Donasi
+
+### Overview
+
+Sejak Februari 2025, modul keuangan terintegrasi penuh dengan modul donasi melalui **auto-posting mechanism**. Setiap donasi tunai yang diterima otomatis tercatat di modul keuangan tanpa perlu input manual.
+
+### Arsitektur
+
+```
+Donasi Tunai (status: received)
+         ↓
+Database Trigger (trg_auto_post_donation_to_finance)
+         ↓
+Auto-create Keuangan Entry
+         ↓
+Update posted_to_finance_at timestamp
+```
+
+### Kondisi Auto-Post
+
+Auto-posting **HANYA** terjadi jika:
+1. ✅ `donation_type` = 'cash' (donasi tunai)
+2. ✅ `status` = 'received' (sudah diterima)
+3. ✅ `posted_to_finance_at` IS NULL (belum pernah di-post)
+
+### Data Mapping
+
+| Field Keuangan | Source | Nilai |
+|----------------|--------|-------|
+| jenis_transaksi | Fixed | 'Pemasukan' |
+| kategori | Fixed | 'Donasi' |
+| jumlah | donations.cash_amount | Rp 500.000 |
+| tanggal | donations.received_date | 2025-02-01 |
+| deskripsi | donor_name + notes | 'Donasi dari Ibu Siti - Untuk operasional' |
+| penerima_pembayar | donations.donor_name | 'Ibu Siti' |
+| akun_kas | Fixed | 'Kas Utama' |
+| referensi | 'donation:' + id | 'donation:123e4567...' |
+| status | Fixed | 'posted' |
+
+### Monitoring Queries
+
+**1. Check Unposted Donations:**
+```sql
+SELECT 
+  id, donor_name, cash_amount, donation_date
+FROM donations 
+WHERE donation_type = 'cash' 
+  AND status = 'received' 
+  AND posted_to_finance_at IS NULL;
+-- Expected: 0 rows
+```
+
+**2. View Donation Entries:**
+```sql
+SELECT 
+  tanggal, deskripsi, jumlah, referensi, created_at
+FROM keuangan 
+WHERE referensi LIKE 'donation:%'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+**3. Check Sync Errors:**
+```sql
+SELECT * FROM donation_finance_sync_log 
+WHERE created_at > NOW() - INTERVAL '24 hours'
+ORDER BY created_at DESC;
+-- Expected: 0 rows (no errors)
+```
+
+**4. Monthly Reconciliation:**
+```sql
+SELECT 
+  TO_CHAR(d.donation_date, 'YYYY-MM') as bulan,
+  COUNT(d.id) as jumlah_donasi,
+  SUM(d.cash_amount) as total_donasi,
+  COUNT(k.id) as jumlah_keuangan,
+  SUM(k.jumlah) as total_keuangan
+FROM donations d
+LEFT JOIN keuangan k ON k.referensi = 'donation:' || d.id::text
+WHERE d.donation_type = 'cash'
+  AND d.status = 'received'
+GROUP BY bulan
+ORDER BY bulan DESC;
+-- jumlah_donasi should equal jumlah_keuangan
+```
+
+### Troubleshooting
+
+**Problem:** Donasi tidak auto-post
+
+**Solution 1 - Force Retry:**
+```sql
+UPDATE donations 
+SET status = status 
+WHERE id = 'xxx';
+```
+
+**Solution 2 - Manual Post:**
+```sql
+INSERT INTO keuangan (
+  jenis_transaksi, kategori, jumlah, tanggal, 
+  deskripsi, referensi, akun_kas, status, created_by
+)
+SELECT 
+  'Pemasukan', 'Donasi', cash_amount,
+  COALESCE(received_date, donation_date),
+  'Donasi dari ' || donor_name || COALESCE(' - ' || notes, ''),
+  'donation:' || id::text,
+  'Kas Utama', 'posted', created_by
+FROM donations
+WHERE id = 'xxx';
+
+UPDATE donations 
+SET posted_to_finance_at = NOW() 
+WHERE id = 'xxx';
+```
+
+**Dokumentasi Lengkap:** [DONASI_KEUANGAN_AUTO_POST_GUIDE.md](DONASI_KEUANGAN_AUTO_POST_GUIDE.md)
+
+---
+
 ## 🔗 Integration
 
 ### 1. **Donasi → Keuangan** ✅
 
-```typescript
-// Sudah auto-post saat create donasi tunai
+**Status:** Fully Implemented (Februari 2025)
+
+**Cara Kerja:**
+- Donasi tunai dengan status 'received' otomatis membuat entry di keuangan
+- Menggunakan database trigger: `trg_auto_post_donation_to_finance`
+- Kategori: 'Donasi', Akun: 'Kas Utama', Status: 'posted'
+- Referensi: 'donation:{uuid}' untuk tracking
+
+**Monitoring:**
+```sql
+-- Check unposted donations (should be 0)
+SELECT COUNT(*) 
+FROM donations 
+WHERE donation_type = 'cash' 
+  AND status = 'received' 
+  AND posted_to_finance_at IS NULL;
+
+-- View donation entries in keuangan
+SELECT * FROM keuangan 
+WHERE referensi LIKE 'donation:%'
+ORDER BY created_at DESC;
 ```
+
+**Dokumentasi Lengkap:** [DONASI_KEUANGAN_AUTO_POST_GUIDE.md](DONASI_KEUANGAN_AUTO_POST_GUIDE.md)
 
 ### 2. **Pembayaran Santri → Keuangan**
 
@@ -1043,7 +1186,8 @@ SET saldo_saat_ini = calculate_saldo_akun(nama);
 - ✅ 10+ helper functions
 - ✅ Default master data
 - ✅ Integration logic
-- ✅ Auto-posting triggers
+- ✅ **Auto-posting triggers (Donasi → Keuangan)** ✨
+- ✅ Error logging & monitoring system
 
 ### 🔄 UI Implementation Priority:
 

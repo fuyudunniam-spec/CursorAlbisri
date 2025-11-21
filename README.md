@@ -91,6 +91,7 @@ Dokumentasi komprehensif mencakup:
 
 ### ✅ Modul Inventaris
 - Stock management
+- Multi-item sales transactions
 - Search & filter
 - Export CSV
 - Stock warnings
@@ -155,7 +156,9 @@ Dokumentasi komprehensif mencakup:
 
 ### Inventaris:
 - `inventaris` - Master item
-- `transaksi_inventaris` - History transaksi (Coming Soon)
+- `transaksi_inventaris` - History transaksi
+- `penjualan_header` - Multi-item sales header
+- `penjualan_items` - Multi-item sales line items
 
 ### Others:
 - `monitoring_kegiatan` - Monitoring activities
@@ -258,6 +261,12 @@ Open: http://localhost:8080
 ## 📖 Documentation
 
 Baca dokumentasi lengkap untuk setiap modul:
+
+### Multi-Item Sales Feature
+- **[API Documentation](./MULTI_ITEM_SALES_API_DOCUMENTATION.md)** - Complete API reference for service functions
+- **[Database Schema](./MULTI_ITEM_SALES_DATABASE_SCHEMA.md)** - Database tables, relationships, and indexes
+- **[User Guide](./MULTI_ITEM_SALES_USER_GUIDE.md)** - Step-by-step guide for end users
+- **[Architecture](./MULTI_ITEM_SALES_ARCHITECTURE.md)** - System architecture and technical design
 
 
 ---
@@ -436,6 +445,7 @@ Proprietary - Pesantren Al-Bisri
 ### Version 2.0 (Oktober 2025)
 
 **New Features:**
+- ✅ Multi-Item Sales Transactions (Inventaris)
 - ✅ Modul Beasiswa dengan workflow approval
 - ✅ Program Santri dengan komponen biaya
 - ✅ Donor Tracking System (tier & badges)

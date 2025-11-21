@@ -65,6 +65,11 @@ export const donationHeaderSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal("")),
+  akun_kas_id: z.string()
+    .uuid("ID akun kas tidak valid")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
   
   // Restrictions
   is_restricted: z.boolean().default(false),
@@ -96,6 +101,14 @@ export const donationHeaderSchema = z.object({
         path: ["cash_amount"]
       });
     }
+    // Validate akun_kas_id for cash donations
+    if (!data.akun_kas_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Akun kas wajib dipilih untuk donasi tunai",
+        path: ["akun_kas_id"]
+      });
+    }
   }
   
   // Validate mixed donations must have either cash_amount or items (or both)
@@ -108,6 +121,14 @@ export const donationHeaderSchema = z.object({
         code: z.ZodIssueCode.custom,
         message: "Jumlah donasi tunai tidak boleh negatif",
         path: ["cash_amount"]
+      });
+    }
+    // Validate akun_kas_id for mixed donations with cash
+    if (hasCash && !data.akun_kas_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Akun kas wajib dipilih untuk donasi campuran dengan tunai",
+        path: ["akun_kas_id"]
       });
     }
   }
@@ -188,6 +209,9 @@ export const donationItemSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal("")),
+  
+  // Posting status
+  is_posted_to_stock: z.boolean().optional().default(false),
 }).superRefine((data, ctx) => {
   // If inventory type and mapped, must have mapped_item_id
   if (data.item_type === "inventory" && data.mapping_status === "mapped" && !data.mapped_item_id) {

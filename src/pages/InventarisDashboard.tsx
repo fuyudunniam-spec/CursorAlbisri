@@ -636,15 +636,19 @@ const InventarisDashboard: React.FC = () => {
                       <span className="text-sm font-medium">Stok Menipis ({lowStockItems.length})</span>
                     </div>
                     <div className="space-y-1.5">
-                      {lowStockItems.slice(0, 5).map((item) => (
-                        <div key={item.id} className="flex items-center justify-between p-2 bg-orange-50 rounded text-sm">
-                          <span className="font-medium text-gray-900">{item.nama_barang}</span>
-                          <span className="text-gray-600">
-                            {item.jumlah || 0}
-                            {item.min_stock && ` / ${item.min_stock}`}
-                          </span>
-                        </div>
-                      ))}
+                      {lowStockItems.slice(0, 5).map((item) => {
+                        const qty = item.jumlah || 0;
+                        const displayQty = qty === 0 ? 'Habis' : qty.toString();
+                        return (
+                          <div key={item.id} className="flex items-center justify-between p-2 bg-orange-50 rounded text-sm">
+                            <span className="font-medium text-gray-900">{item.nama_barang}</span>
+                            <span className="text-gray-600">
+                              {displayQty}
+                              {qty !== 0 && item.min_stock && ` / ${item.min_stock}`}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

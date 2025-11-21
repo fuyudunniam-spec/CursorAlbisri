@@ -33,6 +33,15 @@ interface Transaction {
   referensi?: string;
 }
 
+// Helper function to extract source from referensi
+const getSourceFromReferensi = (referensi?: string): string | null => {
+  if (!referensi) return null;
+  if (referensi.startsWith('donation:')) return 'Donasi';
+  if (referensi.startsWith('inventory_sale:')) return 'Penjualan Inventaris';
+  if (referensi.startsWith('pembayaran_santri:')) return 'Pembayaran Santri';
+  return null;
+};
+
 interface RiwayatTransaksiProps {
   transactions: Transaction[];
   selectedAccountId?: string;
@@ -56,6 +65,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
   const [filterType, setFilterType] = useState<string>('all');
   // Status filter removed - not used in this system
   const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterSource, setFilterSource] = useState<string>('all'); // New: filter by source (donation, inventory, etc.)
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [sortBy, setSortBy] = useState<string>('tanggal');
@@ -149,6 +159,13 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
 
   // Get unique categories for filter
   const uniqueCategories = Array.from(new Set(transactions.map(t => t.kategori)));
+  
+  // Get unique sources for filter
+  const uniqueSources = Array.from(new Set(
+    transactions
+      .map(t => getSourceFromReferensi(t.referensi))
+      .filter((source): source is string => source !== null)
+  ));
 
   // Date filter logic
   const getDateFilter = (transaction: Transaction) => {
@@ -204,7 +221,13 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
     const matchesAccount = !selectedAccountId || transaction.akun_kas_id === selectedAccountId;
     const matchesDate = getDateFilter(transaction);
     
-    return matchesSearch && matchesType && matchesStatus && matchesCategory && matchesAccount && matchesDate;
+    // Filter by source (donation, inventory, etc.)
+    const transactionSource = getSourceFromReferensi(transaction.referensi);
+    const matchesSource = filterSource === 'all' || 
+                         (filterSource === 'manual' && !transactionSource) ||
+                         transactionSource === filterSource;
+    
+    return matchesSearch && matchesType && matchesStatus && matchesCategory && matchesAccount && matchesDate && matchesSource;
   });
 
   // Sort transactions
@@ -269,7 +292,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
   // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterType, filterCategory, selectedAccountId, dateFilter]);
+  }, [searchTerm, filterType, filterCategory, filterSource, selectedAccountId, dateFilter]);
 
   const handlePreviousPage = () => {
     if (currentPage > 1) {
@@ -346,6 +369,20 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                 <SelectItem value="all">Semua Kategori</SelectItem>
                 {uniqueCategories.map(category => (
                   <SelectItem key={category} value={category}>{category}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Source Filter - NEW */}
+            <Select value={filterSource} onValueChange={setFilterSource}>
+              <SelectTrigger className="w-[150px] h-9 text-xs border-gray-200">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Sumber</SelectItem>
+                <SelectItem value="manual">Manual</SelectItem>
+                {uniqueSources.map(source => (
+                  <SelectItem key={source} value={source}>{source}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -452,6 +489,19 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                 </Button>
               </Badge>
             )}
+            {filterSource !== 'all' && (
+              <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 text-xs px-2 py-0.5">
+                Sumber: {filterSource}
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setFilterSource('all')}
+                  className="h-4 w-4 p-0 ml-1.5 hover:bg-transparent"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </Badge>
+            )}
             {dateFilter !== 'all' && (
               <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 text-xs px-2 py-0.5">
                 Periode: {dateFilter === 'custom' ? 'Custom' : dateFilter}
@@ -469,157 +519,274 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
         </div>
 
         {/* Table Wrapper with Horizontal Scroll for Mobile */}
-        <div className="overflow-x-auto -mx-4 sm:mx-0 pb-4 overflow-y-visible">
-          <div className="min-w-[800px] px-4 sm:px-0 pb-2">
-            {/* Table Header with Sort */}
-            <div className="grid grid-cols-12 gap-4 p-3 bg-gray-50 rounded-lg font-medium text-xs text-gray-600 border-b border-gray-200">
-              <div className="col-span-1 hidden sm:block">
-                <input type="checkbox" className="rounded border-gray-300" />
+        <div className="overflow-x-auto -mx-4 sm:mx-0">
+          <div className="min-w-full inline-block align-middle">
+            <div className="overflow-hidden">
+              {/* Desktop Table View - Hidden on Mobile */}
+              <div className="hidden lg:block">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="w-10 px-3 py-3 text-left">
+                        <input type="checkbox" className="rounded border-gray-300" />
+                      </th>
+                      <th 
+                        className="px-3 py-3 text-left text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                        onClick={() => handleSort('tanggal')}
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Tanggal</span>
+                          {sortBy === 'tanggal' && (
+                            <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="px-3 py-3 text-left text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                        onClick={() => handleSort('kategori')}
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Kategori</span>
+                          {sortBy === 'kategori' && (
+                            <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-600">
+                        Deskripsi
+                      </th>
+                      <th 
+                        className="px-3 py-3 text-right text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                        onClick={() => handleSort('jumlah')}
+                      >
+                        <div className="flex items-center justify-end space-x-1">
+                          <span>Jumlah</span>
+                          {sortBy === 'jumlah' && (
+                            <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-600">
+                        Aksi
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {currentTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
+                          Tidak ada transaksi ditemukan
+                        </td>
+                      </tr>
+                    ) : (
+                      currentTransactions.map((transaction) => (
+                        <tr 
+                          key={transaction.id}
+                          className={`transition-colors ${
+                            transaction.jenis_transaksi === 'Pemasukan' 
+                              ? 'bg-emerald-50/30 hover:bg-emerald-50/50' 
+                              : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <input type="checkbox" className="rounded border-gray-300" />
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              {getTransactionIcon(transaction.jenis_transaksi)}
+                              <span className="text-xs font-medium text-gray-900">
+                                {formatDateWithTime(transaction)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="text-xs font-medium text-gray-900 mb-1">
+                              {transaction.display_category || transaction.kategori}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {transaction.referensi?.startsWith('donation:') && (
+                                <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-800 border-purple-200">
+                                  Donasi
+                                </Badge>
+                              )}
+                              {transaction.referensi?.startsWith('inventory_sale:') && (
+                                <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-800 border-blue-200">
+                                  Inventaris
+                                </Badge>
+                              )}
+                              {transaction.referensi?.startsWith('pembayaran_santri:') && (
+                                <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 border-green-200">
+                                  Pembayaran
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="text-xs text-gray-700 max-w-md">
+                              {transaction.display_description || transaction.deskripsi}
+                            </div>
+                            {transaction.penerima_pembayar && (
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                {transaction.penerima_pembayar}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap text-right">
+                            <div className={`text-sm font-semibold ${
+                              transaction.jenis_transaksi === 'Pemasukan' 
+                                ? 'text-emerald-600' 
+                                : 'text-rose-600'
+                            }`}>
+                              {formatCurrency(transaction.jumlah)}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {transaction.akun_kas_nama}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap text-right">
+                            <div className="flex items-center justify-end space-x-1">
+                              {transaction.auto_posted || 
+                               transaction.referensi?.startsWith('inventory_sale:') ||
+                               transaction.referensi?.startsWith('donation:') ||
+                               transaction.referensi?.startsWith('donasi:') ||
+                               transaction.referensi?.startsWith('pembayaran_santri:') ? (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => onEditTransaction?.(transaction)}
+                                    className="h-8 w-8 p-0 hover:bg-blue-100"
+                                    title="Edit transaksi"
+                                  >
+                                    <Edit className="h-4 w-4 text-blue-600" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => onDeleteTransaction?.(transaction)}
+                                    className="h-8 w-8 p-0 hover:bg-red-100"
+                                    title="Hapus transaksi"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-600" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
-              <div 
-                className="col-span-3 sm:col-span-2 cursor-pointer hover:text-gray-900 flex items-center space-x-1"
-                onClick={() => handleSort('tanggal')}
-              >
-                <span>Tanggal</span>
-                {sortBy === 'tanggal' && (
-                  <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                )}
-              </div>
-              <div 
-                className="col-span-3 sm:col-span-2 cursor-pointer hover:text-gray-900 flex items-center space-x-1"
-                onClick={() => handleSort('kategori')}
-              >
-                <span>Kategori</span>
-                {sortBy === 'kategori' && (
-                  <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                )}
-              </div>
-              <div className="col-span-3 sm:col-span-3">Deskripsi</div>
-              <div className="col-span-1 hidden sm:block">Status</div>
-              <div 
-                className="col-span-2 cursor-pointer hover:text-gray-900 flex items-center justify-end space-x-1"
-                onClick={() => handleSort('jumlah')}
-              >
-                <span>Jumlah</span>
-                {sortBy === 'jumlah' && (
-                  <span className="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                )}
-              </div>
-              <div className="col-span-1 text-right">Aksi</div>
-            </div>
 
-            {/* Transactions Table */}
-            <div className="space-y-2">
-              {currentTransactions.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  Tidak ada transaksi ditemukan
-                </div>
-              ) : (
-                currentTransactions.map((transaction) => (
-              <div
-                key={transaction.id}
-                className={`grid grid-cols-12 gap-4 p-3 rounded-lg border transition-all duration-150 ${
-                  transaction.jenis_transaksi === 'Pemasukan' 
-                    ? 'bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50' 
-                    : 'bg-white border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                {/* Checkbox */}
-                <div className="col-span-1 hidden sm:flex items-center">
-                  <input
-                    type="checkbox"
-                    className="rounded border-gray-300"
-                  />
-                </div>
-                
-                {/* Date */}
-                <div className="col-span-3 sm:col-span-2 flex items-center gap-2">
-                  {getTransactionIcon(transaction.jenis_transaksi)}
-                  <span className="text-xs font-medium text-gray-900">
-                    {formatDateWithTime(transaction)}
-                  </span>
-                </div>
-                
-                {/* Category */}
-                <div className="col-span-3 sm:col-span-2">
-                  <div className="text-xs font-medium text-gray-900">
-                    {transaction.display_category || transaction.kategori}
+              {/* Mobile Card View - Visible on Mobile/Tablet */}
+              <div className="lg:hidden space-y-3 px-4 sm:px-0">
+                {currentTransactions.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Tidak ada transaksi ditemukan
                   </div>
-                  {transaction.source_type && (
-                    <Badge variant="outline" className="text-xs mt-1 bg-gray-50 border-gray-200">
-                      {transaction.source_type}
-                    </Badge>
-                  )}
-                </div>
-                
-                {/* Description */}
-                <div className="col-span-3 sm:col-span-3">
-                  <div className="text-xs text-gray-700 line-clamp-1">
-                    {transaction.display_description || transaction.deskripsi}
-                  </div>
-                  {transaction.penerima_pembayar && (
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {transaction.penerima_pembayar}
+                ) : (
+                  currentTransactions.map((transaction) => (
+                    <div
+                      key={transaction.id}
+                      className={`rounded-lg border p-4 space-y-3 ${
+                        transaction.jenis_transaksi === 'Pemasukan' 
+                          ? 'bg-emerald-50/50 border-emerald-200' 
+                          : 'bg-white border-gray-200'
+                      }`}
+                    >
+                      {/* Header: Date and Amount */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {getTransactionIcon(transaction.jenis_transaksi)}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-medium text-gray-900">
+                              {formatDateWithTime(transaction)}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {transaction.akun_kas_nama}
+                            </div>
+                          </div>
+                        </div>
+                        <div className={`text-right flex-shrink-0 text-sm font-semibold ${
+                          transaction.jenis_transaksi === 'Pemasukan' 
+                            ? 'text-emerald-600' 
+                            : 'text-rose-600'
+                        }`}>
+                          {formatCurrency(transaction.jumlah)}
+                        </div>
+                      </div>
+
+                      {/* Category and Badges */}
+                      <div>
+                        <div className="text-xs font-medium text-gray-900 mb-1.5">
+                          {transaction.display_category || transaction.kategori}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {transaction.referensi?.startsWith('donation:') && (
+                            <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-800 border-purple-200">
+                              Donasi
+                            </Badge>
+                          )}
+                          {transaction.referensi?.startsWith('inventory_sale:') && (
+                            <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-800 border-blue-200">
+                              Inventaris
+                            </Badge>
+                          )}
+                          {transaction.referensi?.startsWith('pembayaran_santri:') && (
+                            <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 border-green-200">
+                              Pembayaran
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      <div>
+                        <div className="text-xs text-gray-700">
+                          {transaction.display_description || transaction.deskripsi}
+                        </div>
+                        {transaction.penerima_pembayar && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {transaction.penerima_pembayar}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      {!(transaction.auto_posted || 
+                         transaction.referensi?.startsWith('inventory_sale:') ||
+                         transaction.referensi?.startsWith('donation:') ||
+                         transaction.referensi?.startsWith('donasi:') ||
+                         transaction.referensi?.startsWith('pembayaran_santri:')) && (
+                        <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onEditTransaction?.(transaction)}
+                            className="flex-1 h-8 text-xs"
+                          >
+                            <Edit className="h-3 w-3 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onDeleteTransaction?.(transaction)}
+                            className="flex-1 h-8 text-xs text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Hapus
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                
-                {/* Status - Hidden */}
-                <div className="col-span-1 hidden sm:flex items-center">
-                  <span className="text-transparent text-xs">-</span>
-                </div>
-                
-                {/* Amount */}
-                <div className="col-span-2 text-right">
-                  <div className={`text-sm font-semibold ${
-                    transaction.jenis_transaksi === 'Pemasukan' 
-                      ? 'text-emerald-600' 
-                      : 'text-rose-600'
-                  }`}>
-                    {formatCurrency(transaction.jumlah)}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {transaction.akun_kas_nama}
-                  </div>
-                </div>
-                
-                {/* Actions - Always on the right */}
-                <div className="col-span-1 flex items-center justify-end space-x-1">
-                  {/* Hide edit/delete buttons for auto-posted entries (from inventaris/donasi) */}
-                  {/* Note: Auto-posted transactions are final and cannot be edited/deleted from keuangan module */}
-                  {transaction.auto_posted || 
-                   transaction.referensi?.startsWith('inventory_sale:') ||
-                   transaction.referensi?.startsWith('donation:') ||
-                   transaction.referensi?.startsWith('donasi:') ||
-                   transaction.referensi?.startsWith('pembayaran_santri:') ? (
-                    // No action buttons for auto-posted transactions
-                    <span className="text-xs text-muted-foreground">-</span>
-                  ) : (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onEditTransaction?.(transaction)}
-                        className="h-8 w-8 p-0 hover:bg-blue-100"
-                        title="Edit transaksi"
-                      >
-                        <Edit className="h-4 w-4 text-blue-600" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onDeleteTransaction?.(transaction)}
-                        className="h-8 w-8 p-0 hover:bg-red-100"
-                        title="Hapus transaksi"
-                      >
-                        <Trash2 className="h-4 w-4 text-red-600" />
-                      </Button>
-                    </>
-                  )}
-                </div>
+                  ))
+                )}
               </div>
-                ))
-              )}
             </div>
           </div>
         </div>

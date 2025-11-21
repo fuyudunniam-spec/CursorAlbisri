@@ -30,9 +30,21 @@ Modul Donasi adalah sistem manajemen donasi komprehensif dengan fitur:
 - **Print Features** - Nota penerimaan & daftar hajat
 
 ### Tipe Donasi:
-1. **Uang Tunai** → Masuk ke kas keuangan
+1. **Uang Tunai** → **Auto-post ke modul keuangan** ✨ (NEW!)
 2. **Makanan Siap Saji** → Langsung habis (konsumsi)
 3. **Barang/Aset** → Masuk gudang inventaris
+
+### 🔄 Auto-Posting ke Keuangan (NEW!)
+
+Sejak Februari 2025, donasi tunai **otomatis tercatat** di modul keuangan tanpa perlu input manual!
+
+**Cara Kerja:**
+- Saat donasi tunai dengan status 'received' dicatat
+- System otomatis membuat entry di tabel keuangan
+- Kategori: 'Donasi', Akun: 'Kas Utama'
+- Referensi: 'donation:{uuid}' untuk tracking
+
+**Lihat dokumentasi lengkap:** [DONASI_KEUANGAN_AUTO_POST_GUIDE.md](DONASI_KEUANGAN_AUTO_POST_GUIDE.md)
 
 ---
 
@@ -341,6 +353,49 @@ Ibu Siti
 │ Status: 🟢 Active (5 hari lalu)     │
 └─────────────────────────────────────┘
 ```
+
+---
+
+## 🔄 Integration dengan Modul Keuangan
+
+### Auto-Posting Donasi Tunai
+
+**Fitur Baru (Februari 2025):** Donasi tunai otomatis ter-post ke modul keuangan!
+
+**Kondisi Auto-Post:**
+1. ✅ `donation_type` = 'cash'
+2. ✅ `status` = 'received'
+3. ✅ Belum pernah di-post sebelumnya
+
+**Data yang Di-copy:**
+
+| Field Keuangan | Source Donasi |
+|----------------|---------------|
+| Jenis Transaksi | 'Pemasukan' |
+| Kategori | 'Donasi' |
+| Jumlah | cash_amount |
+| Tanggal | received_date atau donation_date |
+| Deskripsi | 'Donasi dari {donor_name} - {notes}' |
+| Akun Kas | 'Kas Utama' |
+| Referensi | 'donation:{uuid}' |
+| Status | 'posted' |
+
+**Monitoring:**
+
+```sql
+-- Check donasi yang belum ter-post (should be 0)
+SELECT COUNT(*) 
+FROM donations 
+WHERE donation_type = 'cash' 
+  AND status = 'received' 
+  AND posted_to_finance_at IS NULL;
+
+-- Check recent errors
+SELECT * FROM donation_finance_sync_log 
+WHERE created_at > NOW() - INTERVAL '24 hours';
+```
+
+**Troubleshooting:** Lihat [DONASI_KEUANGAN_AUTO_POST_GUIDE.md](DONASI_KEUANGAN_AUTO_POST_GUIDE.md)
 
 ---
 
@@ -822,6 +877,7 @@ SELECT assign_donor_badges('Nama Donatur');
 
 - ✅ Database lengkap (3 tables)
 - ✅ CRUD donasi multi-tipe
+- ✅ **Auto-posting donasi tunai ke keuangan** ✨ (NEW!)
 - ✅ Donor tracking dengan tier & badges
 - ✅ Hajat management
 - ✅ Export CSV/PDF

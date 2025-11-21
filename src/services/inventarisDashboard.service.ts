@@ -80,14 +80,14 @@ export const getInventoryDashboardStats = async (): Promise<InventoryStats> => {
 
   // Get pending donations (donations with items not yet posted to stock)
   // EXCLUDE direct_consumption items (kategori makanan) - hanya tampilkan inventory items
-  const { data: pendingDonations, error: pendingError } = await supabase
+  const { data: allDonations, error: pendingError } = await supabase
     .from('donations')
     .select(`
       id,
       donor_name,
       donation_date,
       donation_type,
-      donation_items!inner (
+      donation_items (
         id,
         raw_item_name,
         quantity,
@@ -97,14 +97,27 @@ export const getInventoryDashboardStats = async (): Promise<InventoryStats> => {
         is_posted_to_stock
       )
     `)
-    .eq('donation_items.is_posted_to_stock', false)
-    .eq('donation_items.item_type', 'inventory') // Hanya item inventory, exclude direct_consumption
     .in('donation_type', ['in_kind', 'mixed'])
     .neq('status', 'cancelled');
 
   if (pendingError) {
     console.error('Error fetching pending donations:', pendingError);
   }
+
+  // Filter di aplikasi: hanya donasi dengan item inventory yang belum dipost
+  // EXCLUDE item dengan item_type = 'direct_consumption'
+  const pendingDonations = (allDonations || []).filter(donation => {
+    const inventoryItems = (donation.donation_items || []).filter(
+      (item: any) => {
+        const isNotPosted = !item.is_posted_to_stock;
+        const isNotDirectConsumption = item.item_type !== 'direct_consumption';
+        const isInventoryType = !item.item_type || item.item_type === 'inventory';
+        
+        return isNotPosted && isNotDirectConsumption && isInventoryType;
+      }
+    );
+    return inventoryItems.length > 0;
+  });
 
   // Calculate stats
   const totalItems = items?.length || 0;
@@ -129,11 +142,20 @@ export const getInventoryDashboardStats = async (): Promise<InventoryStats> => {
 
   const nearExpiryItems = receiveEntries?.length || 0;
 
-  // Count pending donations
-  const pendingDonationsCount = pendingDonations?.length || 0;
-  const pendingDonationItemsCount = pendingDonations?.reduce((sum, donation) => {
-    return sum + (donation.donation_items?.length || 0);
-  }, 0) || 0;
+  // Count pending donations - hanya yang memiliki inventory items
+  const pendingDonationsCount = pendingDonations.length;
+  const pendingDonationItemsCount = pendingDonations.reduce((sum, donation) => {
+    const inventoryItems = (donation.donation_items || []).filter(
+      (item: any) => {
+        const isNotPosted = !item.is_posted_to_stock;
+        const isNotDirectConsumption = item.item_type !== 'direct_consumption';
+        const isInventoryType = !item.item_type || item.item_type === 'inventory';
+        
+        return isNotPosted && isNotDirectConsumption && isInventoryType;
+      }
+    );
+    return sum + inventoryItems.length;
+  }, 0);
 
   // Count transactions
   const totalTransactions = transactions?.length || 0;
@@ -184,6 +206,7 @@ export const getInventoryDashboardStats = async (): Promise<InventoryStats> => {
 /**
  * Get pending donations that need to be posted to inventory
  * Hanya donasi yang memiliki setidaknya 1 item inventory yang belum dipost
+ * EXCLUDE item dengan item_type = 'direct_consumption' (makanan langsung habis)
  */
 export const getPendingDonations = async (): Promise<PendingDonation[]> => {
   // Ambil semua donasi dengan semua item-nya
@@ -214,17 +237,34 @@ export const getPendingDonations = async (): Promise<PendingDonation[]> => {
   }
 
   // Filter di aplikasi: hanya donasi yang memiliki setidaknya 1 item inventory yang belum dipost
+  // EXCLUDE item dengan item_type = 'direct_consumption'
   const filteredDonations = (donations || []).filter(donation => {
     const inventoryItems = (donation.donation_items || []).filter(
-      (item: any) => item.item_type === 'inventory' && !item.is_posted_to_stock
+      (item: any) => {
+        // Hanya ambil item yang:
+        // 1. Belum dipost ke stock
+        // 2. Bukan direct_consumption (makanan langsung habis)
+        // 3. Item type adalah 'inventory' atau null (default inventory)
+        const isNotPosted = !item.is_posted_to_stock;
+        const isNotDirectConsumption = item.item_type !== 'direct_consumption';
+        const isInventoryType = !item.item_type || item.item_type === 'inventory';
+        
+        return isNotPosted && isNotDirectConsumption && isInventoryType;
+      }
     );
     return inventoryItems.length > 0;
   });
 
   return filteredDonations.map(donation => {
-    // Hanya ambil item inventory yang belum dipost
+    // Hanya ambil item inventory yang belum dipost dan bukan direct_consumption
     const inventoryItems = (donation.donation_items || []).filter(
-      (item: any) => item.item_type === 'inventory' && !item.is_posted_to_stock
+      (item: any) => {
+        const isNotPosted = !item.is_posted_to_stock;
+        const isNotDirectConsumption = item.item_type !== 'direct_consumption';
+        const isInventoryType = !item.item_type || item.item_type === 'inventory';
+        
+        return isNotPosted && isNotDirectConsumption && isInventoryType;
+      }
     );
 
     return {
@@ -258,8 +298,10 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
     return [];
   }
 
-  // Group by month
+  // Group by month with sortable key
   const monthlyMap = new Map<string, {
+    sortKey: string;
+    displayMonth: string;
     masuk: number;
     keluar: number;
     stocktake: number;
@@ -269,10 +311,14 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
 
   transactions?.forEach(tx => {
     const date = new Date(tx.tanggal);
-    const monthKey = date.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+    // Use YYYY-MM format for sorting
+    const sortKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const displayMonth = date.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
     
-    if (!monthlyMap.has(monthKey)) {
-      monthlyMap.set(monthKey, {
+    if (!monthlyMap.has(sortKey)) {
+      monthlyMap.set(sortKey, {
+        sortKey,
+        displayMonth,
         masuk: 0,
         keluar: 0,
         stocktake: 0,
@@ -281,7 +327,7 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
       });
     }
 
-    const monthData = monthlyMap.get(monthKey)!;
+    const monthData = monthlyMap.get(sortKey)!;
     
     if (tx.tipe === 'Masuk') {
       monthData.masuk += 1;
@@ -297,21 +343,17 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
     }
   });
 
-  // Convert to array and sort by date
-  const monthlyData: InventoryMonthlyData[] = Array.from(monthlyMap.entries())
-    .map(([month, data]) => ({
-      month,
+  // Convert to array and sort by sortKey (YYYY-MM)
+  const monthlyData: InventoryMonthlyData[] = Array.from(monthlyMap.values())
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+    .map(data => ({
+      month: data.displayMonth,
       masuk: data.masuk,
       keluar: data.keluar,
       stocktake: data.stocktake,
       fromDonation: data.fromDonation,
       fromPurchase: data.fromPurchase
-    }))
-    .sort((a, b) => {
-      const dateA = new Date(a.month);
-      const dateB = new Date(b.month);
-      return dateA.getTime() - dateB.getTime();
-    });
+    }));
 
   // Get last 6 months
   return monthlyData.slice(-6);
@@ -330,28 +372,31 @@ export const getInventoryCategoryData = async (): Promise<InventoryCategoryData[
     return [];
   }
 
-  // Group by category
-  const categoryMap = new Map<string, number>();
+  // Group by category - count total quantity per category
+  const categoryMap = new Map<string, { totalQuantity: number; itemCount: number }>();
 
   items?.forEach(item => {
     const kategori = item.kategori || 'Lainnya';
     const jumlah = parseFloat(item.jumlah?.toString() || '0');
     
     if (!categoryMap.has(kategori)) {
-      categoryMap.set(kategori, 0);
+      categoryMap.set(kategori, { totalQuantity: 0, itemCount: 0 });
     }
     
-    categoryMap.set(kategori, categoryMap.get(kategori)! + jumlah);
+    const catData = categoryMap.get(kategori)!;
+    catData.totalQuantity += jumlah;
+    catData.itemCount += 1;
   });
 
-  // Convert to array
+  // Convert to array - use total quantity as value
   const categories = Array.from(categoryMap.entries())
-    .map(([name, value]) => ({
+    .map(([name, data]) => ({
       name,
-      value,
+      value: Math.round(data.totalQuantity), // Total quantity in this category
       color: getCategoryColor(name),
-      itemCount: items?.filter(item => (item.kategori || 'Lainnya') === name).length || 0
+      itemCount: data.itemCount // Number of different items
     }))
+    .filter(cat => cat.value > 0) // Only show categories with stock
     .sort((a, b) => b.value - a.value);
 
   return categories.slice(0, 6); // Top 6 categories

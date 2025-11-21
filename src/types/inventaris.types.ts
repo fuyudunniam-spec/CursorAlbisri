@@ -98,3 +98,69 @@ export type InventoryStats = {
     net: number;
   };
 };
+
+// ============================================================================
+// Multi-Item Sales Types
+// ============================================================================
+
+export type StockValidationItem = {
+  item_id: string;
+  jumlah: number;
+};
+
+export type StockValidationError = {
+  item_id: string;
+  nama_barang: string;
+  requested: number;
+  available: number;
+  message: string;
+};
+
+export type StockValidationResult = {
+  valid: boolean;
+  errors: StockValidationError[];
+};
+
+export type PenjualanHeader = {
+  id: string;
+  pembeli: string;
+  tanggal: string;
+  total_harga_dasar: number;
+  total_sumbangan: number;
+  grand_total: number;
+  catatan?: string | null;
+  keuangan_id?: string | null;
+  created_at?: string;
+  created_by?: string;
+  updated_at?: string;
+  updated_by?: string;
+};
+
+export type PenjualanItem = {
+  id?: string;
+  penjualan_header_id?: string;
+  item_id: string;
+  nama_barang: string;
+  jumlah: number;
+  harga_dasar: number;
+  sumbangan: number;
+  subtotal: number;
+  transaksi_inventaris_id?: string | null;
+  created_at?: string;
+};
+
+export type MultiItemSalePayload = {
+  pembeli: string;
+  tanggal: string;
+  catatan?: string;
+  items: Array<{
+    item_id: string;
+    jumlah: number;
+    harga_dasar: number;
+    sumbangan: number;
+  }>;
+};
+
+export type MultiItemSaleDetail = PenjualanHeader & {
+  items: PenjualanItem[];
+};

@@ -62,11 +62,14 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
   const [itemsForm, setItemsForm] = useState<DonationItem[]>([]);
   const [suggestions, setSuggestions] = useState<Record<number, ItemSuggestion[]>>({});
   const [inventarisItems, setInventarisItems] = useState<any[]>([]);
+  const [akunKasList, setAkunKasList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
       loadInventarisItems();
+      loadAkunKasList();
       if (editingDonation) {
         // Load editing data
         setDonationForm({
@@ -83,7 +86,8 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
           restricted_tag: editingDonation.restricted_tag,
           notes: editingDonation.notes,
           hajat_doa: editingDonation.hajat_doa,
-          status: editingDonation.status
+          status: editingDonation.status,
+          akun_kas_id: editingDonation.akun_kas_id || null
         });
         
         // Load existing donation items
@@ -153,6 +157,28 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
     }
   };
 
+  const loadAkunKasList = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('akun_kas')
+        .select('*')
+        .eq('status', 'aktif')
+        .neq('nama', 'Tabungan Santri')
+        .order('is_default', { ascending: false });
+      
+      if (error) {
+        console.error('Error loading akun kas:', error);
+        toast.error('Gagal memuat data akun kas');
+        return;
+      }
+      
+      setAkunKasList(data || []);
+    } catch (error) {
+      console.error('Error loading akun kas:', error);
+      toast.error('Gagal memuat data akun kas');
+    }
+  };
+
   const resetForm = () => {
     setDonationForm({
       donation_type: "cash",
@@ -168,10 +194,12 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
       restricted_tag: null,
       notes: null,
       hajat_doa: null,
-      status: "received"
+      status: "received",
+      akun_kas_id: null
     });
     setItemsForm([]);
     setSuggestions({});
+    setValidationErrors({});
   };
 
   const handleAddItemRow = () => {
@@ -203,16 +231,38 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
     const newItems = [...itemsForm];
     const currentItem = newItems[index];
     
-    // Jika mengubah item_type dari direct_consumption ke inventory, reset mapping
-    if (field === 'item_type' && currentItem.item_type === 'direct_consumption' && value === 'inventory') {
-      newItems[index] = {
-        ...currentItem,
-        item_type: value,
-        mapped_item_id: null,
-        mapping_status: 'unmapped',
-        suggested_item_id: null,
-        is_posted_to_stock: false // Reset posting status jika diubah ke inventory
-      };
+    // Handle item_type transitions
+    if (field === 'item_type') {
+      // Transition from direct_consumption to inventory: reset mapping
+      if (currentItem.item_type === 'direct_consumption' && value === 'inventory') {
+        newItems[index] = {
+          ...currentItem,
+          item_type: value,
+          mapped_item_id: null,
+          mapping_status: 'unmapped',
+          suggested_item_id: null,
+          is_posted_to_stock: false as any // Reset posting status
+        } as DonationItem;
+      } 
+      // Transition from inventory to direct_consumption: clear mapping
+      else if (currentItem.item_type === 'inventory' && value === 'direct_consumption') {
+        newItems[index] = {
+          ...currentItem,
+          item_type: value,
+          mapped_item_id: null,
+          mapping_status: 'unmapped',
+          suggested_item_id: null,
+          is_posted_to_stock: false as any // Reset posting status
+        } as DonationItem;
+        
+        // Clear suggestions for this item since it's no longer inventory
+        const newSuggestions = { ...suggestions };
+        delete newSuggestions[index];
+        setSuggestions(newSuggestions);
+      } 
+      else {
+        (newItems[index] as any)[field] = value;
+      }
     } else {
       (newItems[index] as any)[field] = value;
     }
@@ -284,6 +334,7 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setValidationErrors({});
 
     try {
       const fullDonation: FullDonation = {
@@ -294,26 +345,42 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
       const validated = fullDonationSchema.parse(fullDonation);
 
       if (editingDonation) {
+        // Validate akun_kas_id for cash/mixed donations
+        if ((validated.header.donation_type === 'cash' || validated.header.donation_type === 'mixed') && !validated.header.akun_kas_id) {
+          setValidationErrors({ akun_kas_id: 'Pilih akun kas untuk donasi tunai' });
+          toast.error('Pilih akun kas untuk donasi tunai');
+          setLoading(false);
+          return;
+        }
+
         // Update existing donation
+        // Build update payload - only include akun_kas_id for cash/mixed donations
+        const updatePayload: any = {
+          donation_type: validated.header.donation_type,
+          donor_name: validated.header.donor_name,
+          donor_email: validated.header.donor_email,
+          donor_phone: validated.header.donor_phone,
+          donor_address: validated.header.donor_address,
+          donation_date: validated.header.donation_date,
+          received_date: validated.header.received_date,
+          cash_amount: validated.header.cash_amount,
+          payment_method: validated.header.payment_method,
+          is_restricted: validated.header.is_restricted,
+          restricted_tag: validated.header.restricted_tag,
+          notes: validated.header.notes,
+          hajat_doa: validated.header.hajat_doa,
+          status: validated.header.status,
+          updated_at: new Date().toISOString()
+        };
+
+        // Only include akun_kas_id for cash/mixed donations
+        if (validated.header.donation_type === 'cash' || validated.header.donation_type === 'mixed') {
+          updatePayload.akun_kas_id = validated.header.akun_kas_id;
+        }
+
         const { data: donationData, error: donationError } = await supabase
           .from('donations')
-          .update({
-            donation_type: validated.header.donation_type,
-            donor_name: validated.header.donor_name,
-            donor_email: validated.header.donor_email,
-            donor_phone: validated.header.donor_phone,
-            donor_address: validated.header.donor_address,
-            donation_date: validated.header.donation_date,
-            received_date: validated.header.received_date,
-            cash_amount: validated.header.cash_amount,
-            payment_method: validated.header.payment_method,
-            is_restricted: validated.header.is_restricted,
-            restricted_tag: validated.header.restricted_tag,
-            notes: validated.header.notes,
-            hajat_doa: validated.header.hajat_doa,
-            status: validated.header.status,
-            updated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('id', editingDonation.id)
           .select()
           .single();
@@ -356,25 +423,41 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
 
         toast.success("Donasi berhasil diperbarui!");
       } else {
+        // Validate akun_kas_id for cash/mixed donations
+        if ((validated.header.donation_type === 'cash' || validated.header.donation_type === 'mixed') && !validated.header.akun_kas_id) {
+          setValidationErrors({ akun_kas_id: 'Pilih akun kas untuk donasi tunai' });
+          toast.error('Pilih akun kas untuk donasi tunai');
+          setLoading(false);
+          return;
+        }
+
         // Create new donation
+        // Build insert payload - only include akun_kas_id for cash/mixed donations
+        const insertPayload: any = {
+          donation_type: validated.header.donation_type,
+          donor_name: validated.header.donor_name,
+          donor_email: validated.header.donor_email,
+          donor_phone: validated.header.donor_phone,
+          donor_address: validated.header.donor_address,
+          donation_date: validated.header.donation_date,
+          received_date: validated.header.received_date,
+          cash_amount: validated.header.cash_amount,
+          payment_method: validated.header.payment_method,
+          is_restricted: validated.header.is_restricted,
+          restricted_tag: validated.header.restricted_tag,
+          notes: validated.header.notes,
+          hajat_doa: validated.header.hajat_doa,
+          status: validated.header.status
+        };
+
+        // Only include akun_kas_id for cash/mixed donations
+        if (validated.header.donation_type === 'cash' || validated.header.donation_type === 'mixed') {
+          insertPayload.akun_kas_id = validated.header.akun_kas_id;
+        }
+
         const { data: donationData, error: donationError } = await supabase
           .from('donations')
-          .insert([{
-            donation_type: validated.header.donation_type,
-            donor_name: validated.header.donor_name,
-            donor_email: validated.header.donor_email,
-            donor_phone: validated.header.donor_phone,
-            donor_address: validated.header.donor_address,
-            donation_date: validated.header.donation_date,
-            received_date: validated.header.received_date,
-            cash_amount: validated.header.cash_amount,
-            payment_method: validated.header.payment_method,
-            is_restricted: validated.header.is_restricted,
-            restricted_tag: validated.header.restricted_tag,
-            notes: validated.header.notes,
-            hajat_doa: validated.header.hajat_doa,
-            status: validated.header.status
-          }])
+          .insert([insertPayload])
           .select()
           .single();
 
@@ -407,7 +490,12 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
         // Note: Posting to finance is now handled automatically by database trigger
         // when donation_type = 'cash' and status = 'received'
         
-        toast.success("Donasi berhasil dicatat!");
+        // Show success message with auto-posting info for cash donations
+        if ((validated.header.donation_type === 'cash' || validated.header.donation_type === 'mixed') && validated.header.status === 'received') {
+          toast.success("Donasi berhasil dicatat! Donasi tunai otomatis tercatat di modul keuangan.");
+        } else {
+          toast.success("Donasi berhasil dicatat!");
+        }
       }
 
       resetForm();
@@ -435,7 +523,13 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
             <Label>Tipe Donasi *</Label>
             <Select 
               value={donationForm.donation_type} 
-              onValueChange={(value: any) => setDonationForm({ ...donationForm, donation_type: value })}
+              onValueChange={(value: any) => {
+                setDonationForm({ ...donationForm, donation_type: value });
+                // Clear akun_kas_id validation error when changing donation type
+                if (validationErrors.akun_kas_id) {
+                  setValidationErrors({ ...validationErrors, akun_kas_id: '' });
+                }
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -507,33 +601,80 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
 
           {/* Cash-specific fields */}
           {(donationForm.donation_type === 'cash' || donationForm.donation_type === 'mixed') && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="cash_amount">Jumlah (Rp) *</Label>
-                <Input
-                  id="cash_amount"
-                  type="number"
-                  value={donationForm.cash_amount || 0}
-                  onChange={(e) => setDonationForm({ ...donationForm, cash_amount: parseFloat(e.target.value) })}
-                  required
-                />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="cash_amount">Jumlah (Rp) *</Label>
+                  <Input
+                    id="cash_amount"
+                    type="number"
+                    value={donationForm.cash_amount || 0}
+                    onChange={(e) => setDonationForm({ ...donationForm, cash_amount: parseFloat(e.target.value) })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payment_method">Metode Pembayaran</Label>
+                  <Select 
+                    value={donationForm.payment_method || "Cash"} 
+                    onValueChange={(value) => setDonationForm({ ...donationForm, payment_method: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Cash">Tunai</SelectItem>
+                      <SelectItem value="Bank Transfer">Transfer Bank</SelectItem>
+                      <SelectItem value="QRIS">QRIS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="payment_method">Metode Pembayaran</Label>
+                <Label htmlFor="akun_kas_id">Akun Kas *</Label>
                 <Select 
-                  value={donationForm.payment_method || "Cash"} 
-                  onValueChange={(value) => setDonationForm({ ...donationForm, payment_method: value })}
+                  value={donationForm.akun_kas_id || ""} 
+                  onValueChange={(value) => {
+                    setDonationForm({ ...donationForm, akun_kas_id: value || null });
+                    // Clear validation error when user selects a value
+                    if (validationErrors.akun_kas_id) {
+                      setValidationErrors({ ...validationErrors, akun_kas_id: '' });
+                    }
+                  }}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
+                  <SelectTrigger className={validationErrors.akun_kas_id ? "border-red-500" : ""}>
+                    <SelectValue placeholder="Pilih akun kas tujuan" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Cash">Tunai</SelectItem>
-                    <SelectItem value="Bank Transfer">Transfer Bank</SelectItem>
-                    <SelectItem value="QRIS">QRIS</SelectItem>
+                    {akunKasList.map((akun) => (
+                      <SelectItem key={akun.id} value={akun.id}>
+                        {akun.nama} {akun.is_default && '(Default)'}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                {validationErrors.akun_kas_id ? (
+                  <p className="text-xs text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {validationErrors.akun_kas_id}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Pilih akun kas atau bank tempat donasi akan dicatat
+                  </p>
+                )}
               </div>
+              {donationForm.status === 'received' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-800 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <span>
+                      💡 Donasi tunai dengan status "Diterima" akan otomatis tercatat di modul keuangan. 
+                      Anda dapat melihat transaksi ini di riwayat keuangan dengan kategori "Donasi".
+                    </span>
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -590,7 +731,12 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
 
                     {/* Item Type Selection */}
                     <div className="space-y-2">
-                      <Label>Jenis Item *</Label>
+                      <Label className="flex items-center gap-2">
+                        Jenis Item *
+                        <span className="text-xs font-normal text-muted-foreground">
+                          (Tentukan apakah item masuk gudang atau langsung habis)
+                        </span>
+                      </Label>
                       <Select 
                         value={item.item_type || "inventory"} 
                         onValueChange={(value: any) => handleItemChange(index, 'item_type', value)}
@@ -601,37 +747,29 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="inventory">
-                            <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              <span>📦</span>
                               <span className="font-medium">Masuk Inventaris</span>
-                              <span className="text-xs text-muted-foreground">Contoh: Beras, Gula, Minyak</span>
                             </div>
                           </SelectItem>
                           <SelectItem value="direct_consumption">
-                            <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              <span>🍽️</span>
                               <span className="font-medium">Langsung Dikonsumsi</span>
-                              <span className="text-xs text-muted-foreground">Contoh: Makanan matang, Nasi kotak</span>
                             </div>
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">
-                        {item.item_type === "inventory" 
-                          ? "Item akan masuk ke inventaris dan perlu dipetakan ke item yang ada"
-                          : item.item_type === "direct_consumption"
-                          ? "Item langsung dicatat sebagai konsumsi tanpa masuk inventaris"
-                          : "Item akan masuk ke inventaris dan perlu dipetakan ke item yang ada"}
-                      </p>
-                      {item.item_type === "direct_consumption" && (
-                        <p className="text-xs text-blue-600 flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3" />
-                          Item ini akan langsung dicatat sebagai konsumsi tanpa masuk inventaris
-                        </p>
-                      )}
+                      
                       {(item as any).is_posted_to_stock === true && (
-                        <p className="text-xs text-gray-500 flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3" />
-                          Item sudah diposting ke gudang, jenis item tidak bisa diubah
-                        </p>
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                          <p className="text-xs text-gray-700 flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                            <span>
+                              Item sudah diposting ke gudang, jenis item tidak dapat diubah lagi.
+                            </span>
+                          </p>
+                        </div>
                       )}
                     </div>
 
@@ -661,9 +799,6 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
                           onChange={(e) => handleItemChange(index, 'estimated_value', e.target.value ? parseFloat(e.target.value) : null)}
                           placeholder="Kosongkan jika tidak perlu"
                         />
-                        <p className="text-xs text-muted-foreground">
-                          Nilai taksir hanya untuk pencatatan keuangan. Jika dikosongkan, donasi tidak akan masuk ke modul keuangan.
-                        </p>
                       </div>
                       <div className="space-y-2">
                         <Label>Tanggal Kedaluwarsa</Label>

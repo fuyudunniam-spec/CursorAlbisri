@@ -82,6 +82,12 @@ const StockExpiryTable: React.FC<StockExpiryTableProps> = ({
     );
   };
 
+  const formatQuantity = (qty: number): string => {
+    if (qty === 0) return '0';
+    if (qty < 10) return qty.toString();
+    return qty.toString();
+  };
+
   const getStockStatus = (jumlah: number, minStock: number) => {
     if (jumlah === 0) {
       return (
@@ -95,7 +101,7 @@ const StockExpiryTable: React.FC<StockExpiryTableProps> = ({
       return (
         <Badge variant="secondary" className="gap-1">
           <TrendingDown className="h-3 w-3" />
-          Rendah ({jumlah}/{minStock})
+          Rendah ({formatQuantity(jumlah)}/{formatQuantity(minStock)})
         </Badge>
       );
     }

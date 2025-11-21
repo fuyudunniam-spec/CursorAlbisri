@@ -26,6 +26,7 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [donaturList, setDonaturList] = useState<any[]>([]);
+  const [akunKasList, setAkunKasList] = useState<any[]>([]);
   const [showDonaturForm, setShowDonaturForm] = useState(false);
   const [formData, setFormData] = useState({
     donatur_id: '',
@@ -37,12 +38,14 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
     deskripsi: '',
     hajat_doa: '',
     tanggal_donasi: new Date().toISOString().split('T')[0],
-    status: 'Diterima'
+    status: 'Diterima',
+    akun_kas_id: '' // Will be set to default account
   });
 
   useEffect(() => {
     if (open) {
       loadDonatur();
+      loadAkunKas();
     }
   }, [open]);
 
@@ -61,11 +64,41 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
     }
   };
 
+  const loadAkunKas = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('akun_kas')
+        .select('*')
+        .eq('status', 'aktif')
+        .neq('managed_by', 'tabungan')
+        .order('is_default', { ascending: false });
+
+      if (error) throw error;
+      setAkunKasList(data || []);
+      
+      // Set default account if available
+      const defaultAccount = data?.find(a => a.is_default) || data?.[0];
+      if (defaultAccount && !formData.akun_kas_id) {
+        setFormData(prev => ({ ...prev, akun_kas_id: defaultAccount.id }));
+      }
+    } catch (error) {
+      console.error('Error loading akun kas:', error);
+      toast.error('Gagal memuat data akun kas');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
+      // Validate akun_kas_id for cash donations
+      if (formData.jenis_donasi === 'Uang' && !formData.akun_kas_id) {
+        toast.error('Pilih akun kas untuk donasi tunai');
+        setLoading(false);
+        return;
+      }
+
       const donatur = donaturList.find(d => d.id === formData.donatur_id);
       
       const dataToInsert = {
@@ -74,7 +107,9 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
         email_donatur: donatur?.email || null,
         no_telepon: donatur?.no_telepon || null,
         alamat_donatur: donatur?.alamat || null,
-        tanggal_diterima: formData.status === 'Diterima' ? formData.tanggal_donasi : null
+        tanggal_diterima: formData.status === 'Diterima' ? formData.tanggal_donasi : null,
+        // Only include akun_kas_id for cash donations
+        akun_kas_id: formData.jenis_donasi === 'Uang' ? formData.akun_kas_id : null
       };
 
       const { error } = await supabase
@@ -83,11 +118,19 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
 
       if (error) throw error;
 
-      toast.success('Donasi berhasil dicatat dan akan otomatis terintegrasi');
+      // Show success message with auto-posting info for cash donations
+      if (formData.jenis_donasi === 'Uang' && formData.status === 'Diterima') {
+        const akunKas = akunKasList.find(a => a.id === formData.akun_kas_id);
+        toast.success(`Donasi berhasil dicatat! Otomatis masuk ke ${akunKas?.nama || 'akun kas'}.`);
+      } else {
+        toast.success('Donasi berhasil dicatat!');
+      }
+      
       onSuccess();
       onOpenChange(false);
       
       // Reset form
+      const defaultAccount = akunKasList.find(a => a.is_default) || akunKasList[0];
       setFormData({
         donatur_id: '',
         jenis_donasi: 'Uang',
@@ -98,7 +141,8 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
         deskripsi: '',
         hajat_doa: '',
         tanggal_donasi: new Date().toISOString().split('T')[0],
-        status: 'Diterima'
+        status: 'Diterima',
+        akun_kas_id: defaultAccount?.id || ''
       });
     } catch (error) {
       console.error('Error saving donasi:', error);
@@ -180,17 +224,43 @@ export const DonasiForm: React.FC<DonasiFormProps> = ({
             </div>
 
             {formData.jenis_donasi === 'Uang' ? (
-              <div className="space-y-2">
-                <Label htmlFor="jumlah">Jumlah Uang *</Label>
-                <Input
-                  id="jumlah"
-                  type="number"
-                  value={formData.jumlah}
-                  onChange={(e) => setFormData({ ...formData, jumlah: parseFloat(e.target.value) || 0 })}
-                  placeholder="Rp"
-                  required
-                />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="jumlah">Jumlah Uang *</Label>
+                  <Input
+                    id="jumlah"
+                    type="number"
+                    value={formData.jumlah}
+                    onChange={(e) => setFormData({ ...formData, jumlah: parseFloat(e.target.value) || 0 })}
+                    placeholder="Rp"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="akun_kas_id">Akun Kas Tujuan *</Label>
+                  <Select
+                    value={formData.akun_kas_id}
+                    onValueChange={(value) => setFormData({ ...formData, akun_kas_id: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih akun kas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {akunKasList.map((akun) => (
+                        <SelectItem key={akun.id} value={akun.id}>
+                          {akun.nama} {akun.is_default ? '(Default)' : ''} - {akun.tipe}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {formData.status === 'Diterima' && (
+                    <p className="text-xs text-blue-600">
+                      💡 Donasi tunai dengan status "Diterima" akan otomatis tercatat di akun kas yang dipilih
+                    </p>
+                  )}
+                </div>
+              </>
             ) : (
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">

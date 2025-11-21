@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Printer, Share2, Heart, Phone, MapPin, DollarSign, Package, Calendar } from 'lucide-react';
+import { Printer, Share2, Heart, Phone, MapPin, DollarSign, Package, Calendar, Box, Utensils } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   DropdownMenu,
@@ -26,6 +26,7 @@ interface Donation {
     raw_item_name: string;
     quantity: number;
     uom: string;
+    item_type?: 'inventory' | 'direct_consumption';
   }>;
 }
 
@@ -328,9 +329,21 @@ const HajatHariIni: React.FC<HajatHariIniProps> = ({
                       {/* Items for in_kind or mixed donations */}
                       {(donation.donation_type === 'in_kind' || donation.donation_type === 'mixed') && donation.items && donation.items.length > 0 && (
                         donation.items.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-sm text-gray-700">
-                            <Package className="h-4 w-4 text-blue-600" />
-                            <span>{item.raw_item_name}: {item.quantity} {item.uom}</span>
+                          <div key={idx} className="flex items-start gap-2 text-sm text-gray-700">
+                            {item.item_type === 'inventory' ? (
+                              <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs px-1.5 py-0.5 flex items-center gap-1 flex-shrink-0">
+                                <Box className="h-2.5 w-2.5" />
+                                Inventaris
+                              </Badge>
+                            ) : item.item_type === 'direct_consumption' ? (
+                              <Badge className="bg-red-100 text-red-700 border-red-200 text-xs px-1.5 py-0.5 flex items-center gap-1 flex-shrink-0">
+                                <Utensils className="h-2.5 w-2.5" />
+                                Makanan
+                              </Badge>
+                            ) : (
+                              <Package className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                            )}
+                            <span className="flex-1">{item.raw_item_name}: {item.quantity} {item.uom}</span>
                           </div>
                         ))
                       )}

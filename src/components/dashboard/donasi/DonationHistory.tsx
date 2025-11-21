@@ -556,9 +556,15 @@ const DonationHistory: React.FC<DonationHistoryProps> = ({
                                 {filteredItems.slice(0, 2).map((item, idx) => (
                                   <div key={idx} className="flex items-start gap-1.5 text-xs">
                                     {item.item_type === 'inventory' ? (
-                                      <Box className="h-3 w-3 text-orange-600 flex-shrink-0 mt-0.5" />
+                                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] px-1.5 py-0 h-4 flex items-center gap-1 flex-shrink-0">
+                                        <Box className="h-2.5 w-2.5" />
+                                        Inventaris
+                                      </Badge>
                                     ) : item.item_type === 'direct_consumption' ? (
-                                      <Utensils className="h-3 w-3 text-red-600 flex-shrink-0 mt-0.5" />
+                                      <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px] px-1.5 py-0 h-4 flex items-center gap-1 flex-shrink-0">
+                                        <Utensils className="h-2.5 w-2.5" />
+                                        Makanan
+                                      </Badge>
                                     ) : null}
                                     <div className="flex-1 min-w-0">
                                       <span className="text-gray-700 truncate block">{item.raw_item_name}</span>
@@ -751,16 +757,24 @@ const DonationHistory: React.FC<DonationHistoryProps> = ({
                     </div>
                     
                     {filteredItems.length > 0 && (
-                      <div className="space-y-1 pt-2 border-t border-gray-100">
+                      <div className="space-y-1.5 pt-2 border-t border-gray-100">
                         {filteredItems.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-xs">
+                          <div key={idx} className="flex items-start gap-2 text-xs">
                             {item.item_type === 'inventory' ? (
-                              <Box className="h-3 w-3 text-orange-600 flex-shrink-0" />
+                              <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] px-1.5 py-0.5 h-5 flex items-center gap-1 flex-shrink-0">
+                                <Box className="h-2.5 w-2.5" />
+                                Inventaris
+                              </Badge>
                             ) : item.item_type === 'direct_consumption' ? (
-                              <Utensils className="h-3 w-3 text-red-600 flex-shrink-0" />
+                              <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px] px-1.5 py-0.5 h-5 flex items-center gap-1 flex-shrink-0">
+                                <Utensils className="h-2.5 w-2.5" />
+                                Makanan
+                              </Badge>
                             ) : null}
-                            <span className="text-gray-700 flex-1">{item.raw_item_name}</span>
-                            <span className="text-gray-500">({item.quantity} {item.uom})</span>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-gray-700">{item.raw_item_name}</span>
+                              <span className="text-gray-500 ml-1">({item.quantity} {item.uom})</span>
+                            </div>
                           </div>
                         ))}
                       </div>

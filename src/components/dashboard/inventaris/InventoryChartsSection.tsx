@@ -134,22 +134,22 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
                   />
                   <Area 
                     type="monotone" 
-                    dataKey="keluar" 
-                    stroke="#ef4444" 
-                    strokeWidth={2}
-                    fill="url(#colorKeluar)"
-                    name="Keluar"
-                    dot={{ fill: 'white', stroke: '#ef4444', strokeWidth: 2, r: 4 }}
-                    activeDot={{ r: 6 }}
-                  />
-                  <Area 
-                    type="monotone" 
                     dataKey="masuk" 
                     stroke="#10b981" 
                     strokeWidth={2}
                     fill="url(#colorMasuk)"
                     name="Masuk"
                     dot={{ fill: 'white', stroke: '#10b981', strokeWidth: 2, r: 4 }}
+                    activeDot={{ r: 6 }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="keluar" 
+                    stroke="#ef4444" 
+                    strokeWidth={2}
+                    fill="url(#colorKeluar)"
+                    name="Keluar"
+                    dot={{ fill: 'white', stroke: '#ef4444', strokeWidth: 2, r: 4 }}
                     activeDot={{ r: 6 }}
                   />
                 </AreaChart>

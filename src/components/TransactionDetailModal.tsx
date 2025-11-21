@@ -131,6 +131,36 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
                   </div>
                 </>
               )}
+
+              {/* Display referensi field if available */}
+              {transaction.referensi && (
+                <>
+                  <Separator />
+                  <div>
+                    <span className="text-sm text-muted-foreground">Referensi:</span>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {transaction.referensi}
+                      </Badge>
+                      {transaction.referensi.startsWith('donation:') && (
+                        <Badge className="bg-purple-100 text-purple-800 text-xs">
+                          Dari Donasi
+                        </Badge>
+                      )}
+                      {transaction.referensi.startsWith('inventory_sale:') && (
+                        <Badge className="bg-blue-100 text-blue-800 text-xs">
+                          Dari Penjualan Inventaris
+                        </Badge>
+                      )}
+                      {transaction.referensi.startsWith('pembayaran_santri:') && (
+                        <Badge className="bg-green-100 text-green-800 text-xs">
+                          Dari Pembayaran Santri
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

@@ -86,7 +86,7 @@ const StockAlerts: React.FC<StockAlertsProps> = ({ items }) => {
                     <div>
                       <div className="font-medium text-red-800">{item.nama_barang}</div>
                       <div className="text-sm text-red-600">
-                        Stok: 0 (Min: {item.min_stock})
+                        Stok: Habis (Min: {item.min_stock < 10 ? item.min_stock : item.min_stock})
                       </div>
                     </div>
                     <Badge variant="destructive">Habis</Badge>
@@ -121,7 +121,7 @@ const StockAlerts: React.FC<StockAlertsProps> = ({ items }) => {
                       <div>
                         <div className="font-medium">{item.nama_barang}</div>
                         <div className="text-sm">
-                          Stok: {item.jumlah} (Min: {item.min_stock})
+                          Stok: {item.jumlah < 10 ? item.jumlah : item.jumlah} (Min: {item.min_stock < 10 ? item.min_stock : item.min_stock})
                         </div>
                       </div>
                       <Badge variant="secondary">{getUrgencyLabel(urgency)}</Badge>
@@ -155,7 +155,7 @@ const StockAlerts: React.FC<StockAlertsProps> = ({ items }) => {
                     <div>
                       <div className="font-medium text-yellow-800">{item.nama_barang}</div>
                       <div className="text-sm text-yellow-600">
-                        Stok: {item.jumlah} (Min: {item.min_stock})
+                        Stok: {item.jumlah < 10 ? item.jumlah : item.jumlah} (Min: {item.min_stock < 10 ? item.min_stock : item.min_stock})
                       </div>
                     </div>
                     <Badge variant="outline" className="text-yellow-600">
