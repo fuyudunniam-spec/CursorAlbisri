@@ -8,7 +8,8 @@
         "execute_sql",
         "get_logs",
         "list_migrations",
-        "apply_migration"
+        "apply_migration",
+        "get_anon_key"
       ]
     }
   }

@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Package } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MultiItemSalePayload } from '@/types/inventaris.types';
@@ -18,7 +17,17 @@ import {
 } from '@/utils/inventaris-error-handling';
 import TotalSummary from './TotalSummary';
 import ItemList from './ItemList';
+import ItemSelector from './ItemSelector';
 import type { FormItem } from './ItemRow';
+import { Select } from '@radix-ui/react-select';
+import { SelectContent } from '@radix-ui/react-select';
+import { SelectItem } from '@radix-ui/react-select';
+import { SelectItem } from '@radix-ui/react-select';
+import { SelectContent } from '@radix-ui/react-select';
+import { SelectTrigger } from '@radix-ui/react-select';
+import { SelectValue } from '@radix-ui/react-select';
+import { SelectTrigger } from '@radix-ui/react-select';
+import { Select } from '@radix-ui/react-select';
 
 type FormData = {
   pembeli: string;

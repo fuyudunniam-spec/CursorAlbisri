@@ -43,8 +43,45 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, onUpdate, onRemove }) => {
     return (item.harga_dasar * item.jumlah) + item.sumbangan;
   };
 
+  /**
+   * Handle quantity change with validation
+   * Prevents negative values and zero quantity
+   */
+  const handleQuantityChange = (value: string) => {
+    const numValue = parseInt(value) || 0;
+    // Enforce minimum of 1 for quantity (no zero or negative)
+    if (numValue >= 1) {
+      onUpdate(item.tempId, { jumlah: numValue });
+    }
+  };
+
+  /**
+   * Handle price change with validation
+   * Prevents negative values
+   */
+  const handlePriceChange = (value: string) => {
+    const numValue = parseFloat(value) || 0;
+    // Enforce minimum of 0 for price (no negative)
+    if (numValue >= 0) {
+      onUpdate(item.tempId, { harga_dasar: numValue });
+    }
+  };
+
+  /**
+   * Handle donation change with validation
+   * Prevents negative values
+   */
+  const handleDonationChange = (value: string) => {
+    const numValue = parseFloat(value) || 0;
+    // Enforce minimum of 0 for donation (no negative)
+    if (numValue >= 0) {
+      onUpdate(item.tempId, { sumbangan: numValue });
+    }
+  };
+
   const subtotal = calculateSubtotal();
   const hasStockIssue = item.jumlah > item.stok_tersedia;
+  const hasInvalidQuantity = item.jumlah <= 0;
 
   return (
     <tr className="border-t">
@@ -62,13 +99,14 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, onUpdate, onRemove }) => {
           type="number"
           min="1"
           value={item.jumlah}
-          onChange={(e) => onUpdate(item.tempId, { 
-            jumlah: parseInt(e.target.value) || 0 
-          })}
-          className={`w-24 ${hasStockIssue ? 'border-red-500' : ''}`}
+          onChange={(e) => handleQuantityChange(e.target.value)}
+          className={`w-24 ${hasStockIssue || hasInvalidQuantity ? 'border-red-500' : ''}`}
         />
         {hasStockIssue && (
           <p className="text-xs text-red-600 mt-1">Melebihi stok</p>
+        )}
+        {hasInvalidQuantity && (
+          <p className="text-xs text-red-600 mt-1">Minimal 1</p>
         )}
       </td>
 
@@ -77,10 +115,9 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, onUpdate, onRemove }) => {
         <Input
           type="number"
           min="0"
+          step="0.01"
           value={item.harga_dasar}
-          onChange={(e) => onUpdate(item.tempId, { 
-            harga_dasar: parseFloat(e.target.value) || 0 
-          })}
+          onChange={(e) => handlePriceChange(e.target.value)}
           className="w-32"
         />
       </td>
@@ -90,10 +127,9 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, onUpdate, onRemove }) => {
         <Input
           type="number"
           min="0"
+          step="0.01"
           value={item.sumbangan}
-          onChange={(e) => onUpdate(item.tempId, { 
-            sumbangan: parseFloat(e.target.value) || 0 
-          })}
+          onChange={(e) => handleDonationChange(e.target.value)}
           className="w-32"
         />
       </td>
