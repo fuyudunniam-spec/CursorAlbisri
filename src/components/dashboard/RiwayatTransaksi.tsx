@@ -33,11 +33,14 @@ interface Transaction {
   referensi?: string;
 }
 
-// Helper function to extract source from referensi
-const getSourceFromReferensi = (referensi?: string): string | null => {
+// Helper function to extract source from referensi or kategori
+const getSourceFromReferensi = (referensi?: string, kategori?: string): string | null => {
+  // Check kategori first for Penjualan Inventaris (to catch all cases)
+  if (kategori === 'Penjualan Inventaris') return 'Penjualan Inventaris';
+  
   if (!referensi) return null;
   if (referensi.startsWith('donation:')) return 'Donasi';
-  if (referensi.startsWith('inventory_sale:')) return 'Penjualan Inventaris';
+  if (referensi.startsWith('inventory_sale:') || referensi.startsWith('inventaris:')) return 'Penjualan Inventaris';
   if (referensi.startsWith('pembayaran_santri:')) return 'Pembayaran Santri';
   return null;
 };
@@ -50,6 +53,11 @@ interface RiwayatTransaksiProps {
   onViewDetail?: (transaction: Transaction) => void;
   onEditTransaction?: (transaction: Transaction) => void;
   onDeleteTransaction?: (transaction: Transaction) => void;
+  initialDateFilter?: string; // For syncing date filter from parent
+  onDateFilterChange?: (filter: string) => void; // Callback when date filter changes
+  initialCustomStartDate?: string; // For syncing custom start date from parent
+  initialCustomEndDate?: string; // For syncing custom end date from parent
+  onCustomDateChange?: (startDate: string, endDate: string) => void; // Callback when custom dates change
 }
 
 const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
@@ -59,7 +67,12 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
   onClearFilter,
   onViewDetail,
   onEditTransaction,
-  onDeleteTransaction
+  onDeleteTransaction,
+  initialDateFilter,
+  onDateFilterChange,
+  initialCustomStartDate,
+  initialCustomEndDate,
+  onCustomDateChange
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
@@ -71,11 +84,56 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
   const [sortBy, setSortBy] = useState<string>('tanggal');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   
-  // Date filter states
-  const [dateFilter, setDateFilter] = useState<string>('all');
-  const [customStartDate, setCustomStartDate] = useState<Date>();
-  const [customEndDate, setCustomEndDate] = useState<Date>();
+  // Date filter states - sync with parent if provided
+  // Default to 'all' if no initialDateFilter provided, otherwise use initialDateFilter
+  const [dateFilter, setDateFilter] = useState<string>(initialDateFilter || 'all');
+  const [customStartDate, setCustomStartDate] = useState<Date>(
+    initialCustomStartDate ? new Date(initialCustomStartDate) : undefined
+  );
+  const [customEndDate, setCustomEndDate] = useState<Date>(
+    initialCustomEndDate ? new Date(initialCustomEndDate) : undefined
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Sync date filter with parent
+  useEffect(() => {
+    if (initialDateFilter !== undefined && initialDateFilter !== dateFilter) {
+      setDateFilter(initialDateFilter);
+    }
+  }, [initialDateFilter]);
+
+  // Sync custom dates with parent
+  useEffect(() => {
+    if (initialCustomStartDate) {
+      const newStartDate = new Date(initialCustomStartDate);
+      if (!customStartDate || newStartDate.getTime() !== customStartDate.getTime()) {
+        setCustomStartDate(newStartDate);
+      }
+    }
+    if (initialCustomEndDate) {
+      const newEndDate = new Date(initialCustomEndDate);
+      if (!customEndDate || newEndDate.getTime() !== customEndDate.getTime()) {
+        setCustomEndDate(newEndDate);
+      }
+    }
+  }, [initialCustomStartDate, initialCustomEndDate]);
+
+  // Handle date filter change
+  const handleDateFilterChange = (newFilter: string) => {
+    setDateFilter(newFilter);
+    if (onDateFilterChange) {
+      onDateFilterChange(newFilter);
+    }
+  };
+
+  // Handle custom date change
+  const handleCustomDateChange = (start: Date | undefined, end: Date | undefined) => {
+    setCustomStartDate(start);
+    setCustomEndDate(end);
+    if (onCustomDateChange && start && end) {
+      onCustomDateChange(start.toISOString().split('T')[0], end.toISOString().split('T')[0]);
+    }
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -163,7 +221,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
   // Get unique sources for filter
   const uniqueSources = Array.from(new Set(
     transactions
-      .map(t => getSourceFromReferensi(t.referensi))
+      .map(t => getSourceFromReferensi(t.referensi, t.kategori))
       .filter((source): source is string => source !== null)
   ));
 
@@ -173,6 +231,28 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
     const now = new Date();
     
     switch (dateFilter) {
+      case 'bulan-ini': {
+        const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        return transactionDate >= startOfCurrentMonth && transactionDate <= endOfCurrentMonth;
+      }
+      case 'bulan-lalu': {
+        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+        return transactionDate >= lastMonth && transactionDate <= endOfLastMonth;
+      }
+      case '3-bulan': {
+        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        return transactionDate >= threeMonthsAgo && transactionDate <= endOfCurrentMonth;
+      }
+      case 'custom':
+        if (!customStartDate || !customEndDate) return true;
+        const start = new Date(customStartDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(customEndDate);
+        end.setHours(23, 59, 59, 999);
+        return transactionDate >= start && transactionDate <= end;
       case 'today':
         return transactionDate.toDateString() === now.toDateString();
       case 'week':
@@ -181,9 +261,6 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
       case 'month':
         const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
         return transactionDate >= monthAgo;
-      case 'custom':
-        if (!customStartDate || !customEndDate) return true;
-        return transactionDate >= customStartDate && transactionDate <= customEndDate;
       default:
         return true;
     }
@@ -222,7 +299,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
     const matchesDate = getDateFilter(transaction);
     
     // Filter by source (donation, inventory, etc.)
-    const transactionSource = getSourceFromReferensi(transaction.referensi);
+    const transactionSource = getSourceFromReferensi(transaction.referensi, transaction.kategori);
     const matchesSource = filterSource === 'all' || 
                          (filterSource === 'manual' && !transactionSource) ||
                          transactionSource === filterSource;
@@ -388,16 +465,16 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
             </Select>
 
             {/* Date Filter */}
-            <Select value={dateFilter} onValueChange={setDateFilter}>
-              <SelectTrigger className="w-[130px] h-9 text-xs border-gray-200">
+            <Select value={dateFilter} onValueChange={handleDateFilterChange}>
+              <SelectTrigger className="w-[150px] h-9 text-xs border-gray-200">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Semua Tanggal</SelectItem>
-                <SelectItem value="today">Hari Ini</SelectItem>
-                <SelectItem value="week">7 Hari</SelectItem>
-                <SelectItem value="month">30 Hari</SelectItem>
+                <SelectItem value="bulan-ini">Bulan Ini</SelectItem>
+                <SelectItem value="bulan-lalu">Bulan Lalu</SelectItem>
+                <SelectItem value="3-bulan">3 Bulan</SelectItem>
                 <SelectItem value="custom">Custom</SelectItem>
+                <SelectItem value="all">Semua Tanggal</SelectItem>
               </SelectContent>
             </Select>
 
@@ -421,7 +498,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                         <CalendarComponent
                           mode="single"
                           selected={customStartDate}
-                          onSelect={setCustomStartDate}
+                          onSelect={(date) => handleCustomDateChange(date, customEndDate)}
                           className="rounded-md border"
                         />
                       </div>
@@ -430,13 +507,21 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                         <CalendarComponent
                           mode="single"
                           selected={customEndDate}
-                          onSelect={setCustomEndDate}
+                          onSelect={(date) => handleCustomDateChange(customStartDate, date)}
                           className="rounded-md border"
                         />
                       </div>
                       <Button 
                         size="sm" 
-                        onClick={() => setShowDatePicker(false)}
+                        onClick={() => {
+                          setShowDatePicker(false);
+                          if (customStartDate && customEndDate && onCustomDateChange) {
+                            onCustomDateChange(
+                              customStartDate.toISOString().split('T')[0],
+                              customEndDate.toISOString().split('T')[0]
+                            );
+                          }
+                        }}
                         disabled={!customStartDate || !customEndDate}
                       >
                         Terapkan
@@ -609,7 +694,9 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                                   Donasi
                                 </Badge>
                               )}
-                              {transaction.referensi?.startsWith('inventory_sale:') && (
+                              {(transaction.referensi?.startsWith('inventory_sale:') || 
+                                transaction.referensi?.startsWith('inventaris:') ||
+                                transaction.kategori === 'Penjualan Inventaris') && (
                                 <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-800 border-blue-200">
                                   Inventaris
                                 </Badge>
@@ -733,7 +820,9 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                               Donasi
                             </Badge>
                           )}
-                          {transaction.referensi?.startsWith('inventory_sale:') && (
+                          {(transaction.referensi?.startsWith('inventory_sale:') || 
+                            transaction.referensi?.startsWith('inventaris:') ||
+                            transaction.kategori === 'Penjualan Inventaris') && (
                             <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-800 border-blue-200">
                               Inventaris
                             </Badge>

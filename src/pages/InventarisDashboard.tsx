@@ -328,7 +328,7 @@ const InventarisDashboard: React.FC = () => {
   const tabs = [
     { label: 'Dashboard', path: '/inventaris' },
     { label: 'Master Data', path: '/inventaris/master' },
-    { label: 'Penjualan', path: '/inventaris/sales' },
+    { label: 'Transfer', path: '/inventaris/transfer' },
     { label: 'Distribusi', path: '/inventaris/distribution' }
   ];
 
@@ -587,12 +587,14 @@ const InventarisDashboard: React.FC = () => {
             compact={false}
             onRefresh={loadData}
             onNavigateToModule={(module) => {
-              if (module === 'penjualan') {
-                navigate('/inventaris/sales');
-              } else if (module === 'distribusi') {
+              if (module === 'distribusi') {
                 navigate('/inventaris/distribution');
               } else if (module === 'master') {
                 navigate('/inventaris/master');
+              } else if (module === 'penjualan') {
+                navigate('/koperasi/kasir');
+              } else if (module === 'transactions') {
+                // Stay on current page (already showing transactions)
               }
             }}
           />

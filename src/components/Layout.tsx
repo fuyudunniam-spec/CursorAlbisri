@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { canAccessPath, canAccessModule } from '@/utils/permissions';
+import { canAccessPath } from '@/utils/permissions';
 import { 
   LayoutDashboard, 
   Users, 
@@ -37,7 +37,14 @@ import {
   CheckSquare,
   Coins,
   Receipt,
-  TrendingDown
+  TrendingDown,
+  Store,
+  CreditCard,
+  Warehouse,
+  TruckIcon,
+  BarChart2,
+  FileBarChart,
+  Calculator
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -52,9 +59,10 @@ interface LayoutProps {
 interface MenuItem {
   icon: any;
   label: string;
-  path: string;
+  path?: string;
   badge?: string;
-  dividerBefore?: boolean; // Menambahkan divider sebelum item ini
+  dividerBefore?: boolean;
+  subItems?: MenuItem[]; // Support for nested submenu
 }
 
 interface MenuSection {
@@ -69,11 +77,45 @@ const SidebarContent = () => {
   const { user, canAccess } = useAuth();
   // Semua section tertutup by default
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
+  const [expandedSubmenus, setExpandedSubmenus] = useState<string[]>([]);
+  const [pendingTransferCount, setPendingTransferCount] = useState<number>(0);
 
   // Check feature flag for module dashboards
   const showModuleDashboards = getFeature('MODULE_DASHBOARD_ALPHA');
 
+  // Fetch pending transfer count for koperasi admin
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      if (!user) return;
+      
+      // Only fetch for koperasi admin
+      const isKoperasiAdmin = user?.role === 'admin' || user?.roles?.includes('admin_koperasi');
+      if (!isKoperasiAdmin) return;
+
+      try {
+        const { count, error } = await supabase
+          .from('transfer_inventaris')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'pending')
+          .eq('tujuan', 'koperasi');
+
+        if (!error && count !== null) {
+          setPendingTransferCount(count);
+        }
+      } catch (err) {
+        console.error('Error fetching pending transfer count:', err);
+      }
+    };
+
+    fetchPendingCount();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchPendingCount, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
   // Reorganized menu structure with modules and sub-modules
+  // Urutan: Dashboard, Santri, Akademik, Keuangan, Inventaris, Koperasi, Administrasi
   const reorganizedMenuSections: MenuSection[] = [
     {
       title: 'DASHBOARD',
@@ -91,6 +133,35 @@ const SidebarContent = () => {
       ]
     },
     {
+      title: 'AKADEMIK',
+      icon: GraduationCap,
+      items: [
+        // Dashboard Pengajar (untuk role pengajar)
+        ...(user?.role === 'pengajar' || user?.roles?.includes('pengajar') 
+          ? [
+              { icon: LayoutDashboard, label: 'Dashboard Pengajar', path: '/akademik/pengajar' },
+              { icon: UserIcon, label: 'Profil', path: '/akademik/pengajar/profil' }
+            ]
+          : []
+        ),
+        // Setup & Administrasi - hanya untuk admin
+        ...(user?.role === 'admin' || user?.roles?.includes('admin')
+          ? [
+        { icon: BookOpen, label: 'Kelas & Plotting', path: '/akademik/kelas', dividerBefore: user?.role === 'pengajar' || user?.roles?.includes('pengajar') },
+            ]
+          : []
+        ),
+        // Operasional Harian
+        { icon: BookMarked, label: 'Jadwal & Presensi', path: '/akademik/pertemuan', dividerBefore: user?.role === 'pengajar' || user?.roles?.includes('pengajar') },
+        ...(user?.role === 'admin' || user?.roles?.includes('admin')
+          ? [{ icon: Coins, label: 'Setoran', path: '/akademik/setoran' }]
+          : []
+        )
+        // Catatan: Tahun & Semester, Dashboard Akademik, Monitoring, Perizinan bisa diakses langsung via URL
+        // tetapi tidak ditampilkan di menu utama untuk menjaga menu minimal
+      ]
+    },
+    {
       title: 'KEUANGAN',
       icon: DollarSign,
       items: [
@@ -105,49 +176,34 @@ const SidebarContent = () => {
       title: 'INVENTARIS',
       icon: Package,
       items: [
-        { icon: LayoutDashboard, label: 'Dashboard Inventaris', path: '/inventaris' },
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/inventaris' },
         { icon: Package, label: 'Master Data', path: '/inventaris/master' },
-        { icon: ShoppingCart, label: 'Penjualan', path: '/inventaris/sales' },
         { icon: Users, label: 'Distribusi', path: '/inventaris/distribution' }
       ]
     },
     {
-      title: 'AKADEMIK',
-      icon: GraduationCap,
+      title: 'KOPERASI',
+      icon: Store,
       items: [
-        // Dashboard Pengajar (untuk role pengajar)
-        ...(user?.role === 'pengajar' || user?.roles?.includes('pengajar') 
-          ? [
-              { icon: LayoutDashboard, label: 'Dashboard Pengajar', path: '/akademik/pengajar' },
-              { icon: UserIcon, label: 'Profil', path: '/akademik/pengajar/profil' }
-            ]
-          : []
-        ),
-        // Setup & Administrasi (harus dilakukan terlebih dahulu) - hanya untuk admin
-        ...(user?.role === 'admin' || user?.roles?.includes('admin')
-          ? [
-        { icon: CalendarCog, label: 'Tahun & Semester', path: '/akademik/semester' },
-        { icon: BookOpen, label: 'Master Kelas', path: '/akademik/master' },
-        { icon: UserPlus, label: 'Ploating Kelas', path: '/akademik/kelas' },
-            ]
-          : []
-        ),
-        // Operasional Harian (urutan kerja harian)
-        { icon: BookMarked, label: 'Jurnal Pertemuan', path: '/akademik/jurnal', dividerBefore: user?.role === 'pengajar' || user?.roles?.includes('pengajar') },
-        { icon: Users, label: 'Presensi Kelas', path: '/akademik/presensi' },
-        ...(user?.role === 'admin' || user?.roles?.includes('admin')
-          ? [{ icon: Coins, label: 'Setoran Harian', path: '/akademik/setoran' }]
-          : []
-        ),
-        // Monitoring & Laporan - hanya untuk admin
-        ...(user?.role === 'admin' || user?.roles?.includes('admin')
-          ? [
-        { icon: LayoutDashboard, label: 'Dashboard Akademik', path: '/akademik', dividerBefore: true },
-        { icon: BarChart3, label: 'Monitoring Akademik', path: '/monitoring' },
-        { icon: FileText, label: 'Perizinan Santri', path: '/akademik/perizinan', dividerBefore: true }
-            ]
-          : []
-        )
+        { icon: LayoutDashboard, label: 'Dashboard Koperasi', path: '/koperasi' },
+        { icon: Package, label: 'Master Data', path: '/koperasi/master' },
+        { icon: CreditCard, label: 'Kasir/POS', path: '/koperasi/kasir' },
+        { icon: Warehouse, label: 'Inventaris Koperasi', path: '/koperasi/inventaris' },
+        { icon: ShoppingCart, label: 'Penjualan', path: '/koperasi/penjualan' },
+        { 
+          icon: DollarSign, 
+          label: 'Keuangan Koperasi', 
+          path: '/koperasi/keuangan',
+          dividerBefore: true,
+          subItems: [
+            { icon: BarChart3, label: 'Dashboard Keuangan', path: '/koperasi/keuangan/dashboard' },
+            { icon: FileText, label: 'Transaksi Keuangan', path: '/koperasi/keuangan' },
+            { icon: TruckIcon, label: 'Pembelian', path: '/koperasi/keuangan/pembelian' },
+            { icon: Coins, label: 'Operasional', path: '/koperasi/keuangan/operasional' },
+            { icon: Calculator, label: 'Kelola HPP & Bagi Hasil', path: '/koperasi/keuangan/kelola-hpp' }
+          ]
+        },
+        { icon: FileBarChart, label: 'Laporan', path: '/koperasi/laporan', dividerBefore: true }
       ]
     },
     {
@@ -219,12 +275,14 @@ const SidebarContent = () => {
         }
 
         // Map section title to module name for permission check
+        // Urutan: Dashboard, Santri, Akademik, Keuangan, Inventaris, Koperasi, Administrasi
         const sectionModuleMap: Record<string, string> = {
           'DASHBOARD': 'dashboard',
           'SANTRI': 'santri',
+          'AKADEMIK': 'monitoring',
           'KEUANGAN': 'keuangan',
           'INVENTARIS': 'inventaris',
-          'AKADEMIK': 'monitoring',
+          'KOPERASI': 'koperasi',
           'ADMINISTRASI': 'settings'
         };
 
@@ -267,8 +325,21 @@ const SidebarContent = () => {
     );
   };
 
+  const toggleSubmenu = (path: string) => {
+    setExpandedSubmenus(prev => 
+      prev.includes(path) 
+        ? prev.filter(p => p !== path)
+        : [...prev, path]
+    );
+  };
+
   const isActive = (path: string) => {
     return location.pathname === path;
+  };
+
+  const isSubmenuActive = (subItems?: MenuItem[]) => {
+    if (!subItems) return false;
+    return subItems.some(item => item.path && location.pathname.startsWith(item.path));
   };
 
   return (
@@ -328,28 +399,81 @@ const SidebarContent = () => {
               {isExpanded && (
                 <div className="mt-1 space-y-1 pl-2">
                   {section.items.map((item, index) => (
-                    <React.Fragment key={item.path}>
+                    <React.Fragment key={item.path || item.label}>
                       {item.dividerBefore && index > 0 && (
                         <div className="my-2 mx-2 border-t border-gray-200" />
                       )}
-                      <Button
-                        variant="ghost"
-                        className={cn(
-                          "w-full justify-start gap-3 h-9 text-sm",
-                          isActive(item.path) 
-                            ? "bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary font-medium" 
-                            : "text-gray-700 hover:bg-gray-100"
-                        )}
-                        onClick={() => navigate(item.path)}
-                      >
-                        <item.icon className="w-4 h-4" />
-                        <span className="flex-1 text-left">{item.label}</span>
-                        {item.badge && (
-                          <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                            {item.badge}
-                          </Badge>
-                        )}
-                      </Button>
+                      
+                      {/* Item with submenu */}
+                      {item.subItems ? (
+                        <div>
+                          <Button
+                            variant="ghost"
+                            className={cn(
+                              "w-full justify-start gap-3 h-9 text-sm",
+                              (isActive(item.path || '') || isSubmenuActive(item.subItems))
+                                ? "bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary font-medium" 
+                                : "text-gray-700 hover:bg-gray-100"
+                            )}
+                            onClick={() => {
+                              if (item.path) {
+                                navigate(item.path);
+                              }
+                              toggleSubmenu(item.path || item.label);
+                            }}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span className="flex-1 text-left">{item.label}</span>
+                            {expandedSubmenus.includes(item.path || item.label) ? (
+                              <ChevronDown className="w-3 h-3" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3" />
+                            )}
+                          </Button>
+                          
+                          {/* Submenu items */}
+                          {expandedSubmenus.includes(item.path || item.label) && (
+                            <div className="mt-1 space-y-1 pl-6">
+                              {item.subItems.map((subItem) => (
+                                <Button
+                                  key={subItem.path}
+                                  variant="ghost"
+                                  className={cn(
+                                    "w-full justify-start gap-3 h-8 text-sm",
+                                    isActive(subItem.path || '') 
+                                      ? "bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary font-medium" 
+                                      : "text-gray-600 hover:bg-gray-100"
+                                  )}
+                                  onClick={() => subItem.path && navigate(subItem.path)}
+                                >
+                                  <subItem.icon className="w-3.5 h-3.5" />
+                                  <span className="flex-1 text-left text-xs">{subItem.label}</span>
+                                </Button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* Regular item without submenu */
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-3 h-9 text-sm",
+                            isActive(item.path || '') 
+                              ? "bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary font-medium" 
+                              : "text-gray-700 hover:bg-gray-100"
+                          )}
+                          onClick={() => item.path && navigate(item.path)}
+                        >
+                          <item.icon className="w-4 h-4" />
+                          <span className="flex-1 text-left">{item.label}</span>
+                          {item.badge && (
+                            <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                              {item.badge}
+                            </Badge>
+                          )}
+                        </Button>
+                      )}
                     </React.Fragment>
                   ))}
                 </div>

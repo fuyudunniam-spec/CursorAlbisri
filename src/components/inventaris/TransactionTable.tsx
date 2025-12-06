@@ -47,21 +47,18 @@ const TransactionTable = memo(({ rows, loading, onEdit, onDelete }: Props) => {
             <th className="px-3 py-2 text-left">Item</th>
             <th className="px-3 py-2 text-left">Tipe</th>
             <th className="px-3 py-2 text-right">Jumlah</th>
-            <th className="px-3 py-2 text-right">Harga</th>
-            <th className="px-3 py-2 text-right">Total</th>
-            <th className="px-3 py-2 text-left">Penerima</th>
+            <th className="px-3 py-2 text-left">Tujuan</th>
             <th className="px-3 py-2 text-left">Catatan</th>
             <th className="px-3 py-2 text-right">Aksi</th>
           </tr>
         </thead>
         <tbody>
           {loading ? (
-            <tr><td className="px-3 py-6" colSpan={9}>Memuat...</td></tr>
+            <tr><td className="px-3 py-6" colSpan={7}>Memuat...</td></tr>
           ) : rows.length === 0 ? (
-            <tr><td className="px-3 py-6" colSpan={9}>Tidak ada data transaksi</td></tr>
+            <tr><td className="px-3 py-6" colSpan={7}>Tidak ada data transaksi</td></tr>
           ) : (
             rows.map((row) => {
-              const totalValue = (row.jumlah || 0) * (row.harga_satuan || 0);
               const stockChange = row.tipe === "Stocktake" ? 
                 `${row.before_qty || 0} → ${row.after_qty || 0}` : 
                 `${row.tipe === "Masuk" ? "+" : "-"}${row.jumlah || 0}`;
@@ -84,13 +81,7 @@ const TransactionTable = memo(({ rows, loading, onEdit, onDelete }: Props) => {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {row.harga_satuan ? formatRupiah(row.harga_satuan) : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {totalValue > 0 ? formatRupiah(totalValue) : "-"}
-                  </td>
-                  <td className="px-3 py-2">{row.penerima || "-"}</td>
+                  <td className="px-3 py-2">{row.penerima || (row.tipe === "Masuk" ? "Pembelian" : "-")}</td>
                   <td className="px-3 py-2 max-w-[200px] truncate" title={row.catatan || ""}>
                     {row.catatan || "-"}
                   </td>

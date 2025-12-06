@@ -126,6 +126,8 @@ const PresensiKelasPage: React.FC = () => {
         filtered = list.filter(k => k.semester_id === semesterId);
       }
       setClasses(filtered);
+      
+      // Set kelasId jika belum ada atau kelas yang dipilih tidak ada lagi
       if (urlKelasId && filtered.some(k => k.id === urlKelasId)) {
         setKelasId(urlKelasId);
       } else if (!kelasId && filtered.length > 0) {
@@ -135,8 +137,9 @@ const PresensiKelasPage: React.FC = () => {
       }
     } catch (error: any) {
       toast.error(error.message || 'Gagal memuat kelas');
+      setClasses([]);
     }
-  }, [kelasId, urlKelasId, isPengajar, pengajarId]);
+  }, [isPengajar, pengajarId]);
 
   const loadPertemuan = useCallback(async () => {
     if (!kelasId || !selectedSemesterId) {
@@ -231,6 +234,9 @@ const PresensiKelasPage: React.FC = () => {
   useEffect(() => {
     if (selectedSemesterId) {
       loadClasses(selectedSemesterId);
+    } else {
+      setClasses([]);
+      setKelasId('');
     }
   }, [selectedSemesterId, loadClasses]);
 
@@ -411,8 +417,8 @@ const PresensiKelasPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Presensi Kelas</h1>
-          <p className="text-muted-foreground">Lihat dan kelola presensi peserta kelas untuk setiap pertemuan</p>
+          <h2 className="text-xl font-semibold">Presensi Kelas</h2>
+          <p className="text-sm text-muted-foreground">Lihat dan kelola presensi peserta kelas untuk setiap pertemuan</p>
         </div>
       </div>
 
@@ -438,16 +444,23 @@ const PresensiKelasPage: React.FC = () => {
           </div>
           <div>
             <Label>Kelas *</Label>
-            <Select value={kelasId} onValueChange={setKelasId}>
-              <SelectTrigger><SelectValue placeholder="Pilih kelas" /></SelectTrigger>
+            <Select value={kelasId || undefined} onValueChange={(value) => setKelasId(value)} disabled={!selectedSemesterId || classes.length === 0}>
+              <SelectTrigger><SelectValue placeholder={!selectedSemesterId ? "Pilih semester dulu" : classes.length === 0 ? "Tidak ada kelas" : "Pilih kelas"} /></SelectTrigger>
               <SelectContent>
-                {classes.map(k => (
-                  <SelectItem key={k.id} value={k.id}>
-                    {k.nama_kelas} {k.rombel ? `- ${k.rombel}` : ''} ({k.program})
-                  </SelectItem>
-                ))}
+                {classes.length === 0 ? (
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground">Tidak ada kelas untuk semester ini</div>
+                ) : (
+                  classes.map(k => (
+                    <SelectItem key={k.id} value={k.id}>
+                      {k.nama_kelas} {k.rombel ? `- ${k.rombel}` : ''} ({k.program})
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
+            {!selectedSemesterId && (
+              <p className="text-xs text-muted-foreground mt-1">Pilih semester terlebih dahulu</p>
+            )}
           </div>
           <div>
             <Label>Cari</Label>
@@ -474,11 +487,15 @@ const PresensiKelasPage: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {!selectedSemesterId ? (
+            <div className="text-center py-8 text-muted-foreground">Pilih semester terlebih dahulu</div>
+          ) : !kelasId ? (
+            <div className="text-center py-8 text-muted-foreground">Pilih kelas terlebih dahulu</div>
+          ) : loading ? (
             <div className="text-center py-8 text-muted-foreground">Memuat data...</div>
           ) : filteredPertemuan.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              {kelasId ? 'Tidak ada pertemuan untuk kelas ini' : 'Pilih kelas terlebih dahulu'}
+              Tidak ada pertemuan untuk kelas ini pada semester yang dipilih
             </div>
           ) : (
             <div className="overflow-x-auto">

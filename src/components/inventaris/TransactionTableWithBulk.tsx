@@ -191,24 +191,10 @@ const TransactionTableWithBulk = memo(({
                 )}
               </div>
 
-              {/* Harga */}
-              <div className="col-span-2 text-right">
-                {row.harga_satuan && (
-                  <div className="text-sm font-medium text-gray-900">
-                    {formatRupiah(row.harga_satuan)}
-                  </div>
-                )}
-                {row.harga_total && (
-                  <div className="text-xs text-gray-500">
-                    Total: {formatRupiah(row.harga_total)}
-                  </div>
-                )}
-              </div>
-
-              {/* Penerima */}
-              <div className="col-span-2">
+              {/* Tujuan/Penerima */}
+              <div className="col-span-3">
                 <div className="text-sm text-gray-900">
-                  {row.penerima || '-'}
+                  {row.penerima || (row.tipe === "Masuk" ? "Pembelian" : "-")}
                 </div>
                 {row.kategori_barang && (
                   <div className="text-xs text-gray-500">

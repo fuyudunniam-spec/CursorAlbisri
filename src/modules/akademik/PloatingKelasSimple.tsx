@@ -131,7 +131,7 @@ const PloatingKelasSimple: React.FC = () => {
         <CardContent className="grid gap-4 md:grid-cols-3">
           <div>
             <Label>Kelas</Label>
-            <Select value={kelasId} onValueChange={(v: any) => setKelasId(v)}>
+            <Select value={kelasId || undefined} onValueChange={(v: any) => setKelasId(v)}>
               <SelectTrigger><SelectValue placeholder="Pilih kelas" /></SelectTrigger>
               <SelectContent>
                 {kelasOptions.map(k => (

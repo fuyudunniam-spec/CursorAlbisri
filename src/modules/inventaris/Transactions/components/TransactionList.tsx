@@ -11,7 +11,7 @@ import {
   ChevronRight,
   ArrowUpDown,
   Eye,
-  ExternalLink
+  History
 } from 'lucide-react';
 import { InventoryTransaction, Pagination, Sort } from '@/types/inventaris.types';
 
@@ -74,17 +74,33 @@ const TransactionList: React.FC<TransactionListProps> = ({
     );
   };
 
-  const getKeluarModeBadge = (keluarMode: string) => {
-    const variants = {
-      'Penjualan': 'default',
-      'Distribusi': 'outline'
-    } as const;
-
-    return (
-      <Badge variant={variants[keluarMode as keyof typeof variants] || 'outline'}>
-        {keluarMode}
-      </Badge>
-    );
+  // Helper untuk mendapatkan label tujuan yang user-friendly
+  const getTujuanLabel = (penerima: string | null | undefined, tipe: string, keluarMode: string | null | undefined): string => {
+    if (tipe === 'Masuk') {
+      return 'Pembelian';
+    }
+    
+    if (penerima) {
+      // Normalisasi penerima ke 3 opsi default
+      const penerimaLower = penerima.toLowerCase();
+      if (penerimaLower.includes('koperasi')) {
+        return 'Koperasi';
+      } else if (penerimaLower.includes('dapur')) {
+        return 'Dapur';
+      } else if (penerimaLower.includes('distribusi') || penerimaLower.includes('bantuan')) {
+        return 'Distribusi Bantuan';
+      }
+      return penerima; // Fallback ke nilai asli jika tidak cocok
+    }
+    
+    // Fallback berdasarkan keluar_mode
+    if (keluarMode === 'Koperasi') {
+      return 'Koperasi';
+    } else if (keluarMode === 'Distribusi') {
+      return 'Distribusi Bantuan';
+    }
+    
+    return '-';
   };
 
   const handleSort = (column: string) => {
@@ -140,10 +156,9 @@ const TransactionList: React.FC<TransactionListProps> = ({
                 <TableHead>Tipe</TableHead>
                 <TableHead>Item</TableHead>
                 <TableHead>Jumlah</TableHead>
-                <TableHead>Penerima</TableHead>
-                <TableHead>Nilai</TableHead>
-                <TableHead>Keuangan</TableHead>
-                <TableHead className="text-right">Aksi</TableHead>
+                <TableHead>Tujuan</TableHead>
+                <TableHead>Catatan</TableHead>
+                <TableHead className="text-right w-20">Aksi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -161,12 +176,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="space-y-1">
-                      {getTipeBadge(transaction.tipe)}
-                      {transaction.keluar_mode && (
-                        <div>{getKeluarModeBadge(transaction.keluar_mode)}</div>
-                      )}
-                    </div>
+                    {getTipeBadge(transaction.tipe)}
                   </TableCell>
                   <TableCell>
                     <div>
@@ -187,49 +197,19 @@ const TransactionList: React.FC<TransactionListProps> = ({
                     )}
                   </TableCell>
                   <TableCell>
-                    {transaction.penerima ? (
-                      <div>
-                        <div className="font-medium">{transaction.penerima}</div>
-                        {transaction.penerima_santri_id && (
-                          <div className="text-sm text-muted-foreground">
-                            ID: {transaction.penerima_santri_id}
-                          </div>
-                        )}
+                    <div className="font-medium text-sm">
+                      {getTujuanLabel(transaction.penerima, transaction.tipe, transaction.keluar_mode || null)}
+                    </div>
+                    {transaction.penerima_santri_id && (
+                      <div className="text-xs text-muted-foreground">
+                        ID: {transaction.penerima_santri_id}
                       </div>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
                     )}
                   </TableCell>
                   <TableCell>
-                    {transaction.harga_satuan ? (
-                      <div>
-                        <div className="font-medium">
-                          {formatRupiah(transaction.harga_satuan)}/unit
-                        </div>
-                        {transaction.total_nilai && (
-                          <div className="text-sm text-muted-foreground">
-                            Total: {formatRupiah(transaction.total_nilai)}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {transaction.keuangan_id ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleViewKeuangan(transaction.keuangan_id!)}
-                        className="text-blue-600 hover:text-blue-700"
-                      >
-                        <ExternalLink className="h-4 w-4 mr-1" />
-                        Lihat
-                      </Button>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
+                    <div className="text-sm text-gray-700 max-w-[200px] truncate" title={transaction.catatan || ''}>
+                      {transaction.catatan || '-'}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="outline">

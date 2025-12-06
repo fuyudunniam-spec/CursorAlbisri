@@ -46,8 +46,31 @@ export interface SalesFilters {
 
 /**
  * Create a new sales transaction with price breakdown
+ * 
+ * DEPRECATED: Penjualan langsung dari inventaris tidak diperbolehkan.
+ * Semua penjualan harus melalui transfer ke koperasi terlebih dahulu.
+ * Gunakan koperasi kasir untuk penjualan.
+ * 
+ * @deprecated Use koperasi kasir instead
  */
 export const createSalesTransaction = async (data: SalesFormData): Promise<SalesTransaction> => {
+  // Validasi: Pastikan item sudah ditransfer ke koperasi
+  const { data: transferCheck } = await supabase
+    .from('transfer_inventaris')
+    .select('id')
+    .eq('item_id', data.item_id)
+    .eq('tujuan', 'koperasi')
+    .eq('status', 'approved')
+    .limit(1);
+  
+  if (!transferCheck || transferCheck.length === 0) {
+    throw new Error(
+      'Penjualan langsung dari inventaris tidak diperbolehkan. ' +
+      'Item harus ditransfer ke koperasi terlebih dahulu melalui halaman Transfer. ' +
+      'Setelah transfer, gunakan Kasir Koperasi untuk melakukan penjualan.'
+    );
+  }
+  
   // Calculate total value and unit price
   const totalNilai = (data.harga_dasar * data.jumlah) + data.sumbangan;
   const hargaSatuan = Math.max(0, Math.floor(totalNilai / data.jumlah));
@@ -235,6 +258,10 @@ export const updateSalesTransaction = async (id: string, data: Partial<SalesForm
   if (error) throw error;
 
   // Transform to SalesTransaction format
+  // Calculate total_nilai if harga_total is not available
+  const calculatedTotalNilai = result.harga_total || 
+    ((result.harga_dasar || 0) * (result.jumlah || 0) + (result.sumbangan || 0));
+  
   const salesTransaction: SalesTransaction = {
     id: result.id,
     item_id: result.item_id,
@@ -244,7 +271,7 @@ export const updateSalesTransaction = async (id: string, data: Partial<SalesForm
     harga_dasar: result.harga_dasar,
     sumbangan: result.sumbangan,
     harga_satuan: result.harga_satuan,
-    total_nilai: result.harga_total || totalNilai, // Menggunakan harga_total dari database
+    total_nilai: calculatedTotalNilai, // Menggunakan harga_total dari database atau dihitung
     pembeli: result.penerima,
     tanggal: result.tanggal,
     catatan: result.catatan,

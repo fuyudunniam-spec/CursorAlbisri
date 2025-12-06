@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
@@ -742,119 +743,41 @@ const MasterKelasPage: React.FC = () => {
         toast.error('Program wajib diisi');
         return;
       }
-      if (!activeSemester) {
-        toast.error('Belum ada semester aktif. Silakan atur semester aktif terlebih dahulu.');
+      if (!form.semester_id) {
+        toast.error('Semester wajib dipilih');
         return;
       }
 
-      if (agendaItems.length > 0 && agendaValidationErrors.length > 0) {
-        toast.error(agendaValidationErrors[0] as string);
+      const selectedSem = allSemesters.find(s => s.id === form.semester_id);
+      if (!selectedSem) {
+        toast.error('Semester tidak valid');
         return;
       }
 
-      const tahunAjaranName = activeSemester.tahun_ajaran?.nama || form.tahun_ajaran || '';
-      const semesterName = activeSemester.nama || form.semester || '';
-      const tahunAjaranId = activeSemester.tahun_ajaran_id || form.tahun_ajaran_id || null;
-      const semesterId = activeSemester.id || form.semester_id || null;
-
-      // Jika rombel massal diisi, buat banyak kelas sekaligus
-      if (rombelMassal.trim()) {
-        const rombels = rombelMassal.split(',').map(r => r.trim()).filter(Boolean);
-        if (rombels.length === 0) {
-          toast.error('Format Rombel Massal tidak valid');
-          return;
-        }
-        const payloads = rombels.map((r) => ({
-          ...form,
-          tahun_ajaran: tahunAjaranName,
-          semester: semesterName,
-          tahun_ajaran_id: tahunAjaranId || undefined,
-          semester_id: semesterId || undefined,
-          rombel: r,
-          nama_kelas: buildAutoName(form.program || '', form.tingkat || '', r) || form.nama_kelas + ' ' + r
-        }));
-        const created = await AkademikKelasService.createKelasBulk(payloads);
-        await Promise.all(
-          created.map(k =>
-            Promise.all(
-              agendaItems.map(item =>
-                AkademikAgendaService.createAgenda({
-                  kelas_id: k.id,
-                  nama_agenda: item.nama_agenda.trim(),
-                  jenis: item.jenis,
-                  frekuensi: item.frekuensi,
-                  hari: item.hari,
-                  jam_mulai: item.jam_mulai || null,
-                  jam_selesai: item.jam_selesai || null,
-                  lokasi: item.lokasi || null,
-                  catatan: item.catatan || null,
-                  pengajar_id: item.pengajar_id || null,
-                  mapel_id: item.mapel_id || null,
-                  pengajar_nama: item.pengajar_nama ? item.pengajar_nama.trim() : null,
-                  mapel_nama: item.mapel_nama ? item.mapel_nama.trim() : null,
-                  kitab: item.kitab ? item.kitab.trim() : null,
-                  is_setoran: item.is_setoran,
-                  tanggal_mulai: item.tanggal_mulai,
-                  tanggal_selesai: item.tanggal_selesai,
-                }),
-              ),
-            ),
-          ),
-        );
-        toast.success(`Berhasil membuat ${payloads.length} kelas beserta agenda`);
-      } else {
-        const payload: KelasMasterInput = {
-          ...form,
-          tahun_ajaran: tahunAjaranName,
-          semester: semesterName,
-          tahun_ajaran_id: tahunAjaranId || undefined,
-          semester_id: semesterId || undefined,
-        };
-        const created = await AkademikKelasService.createKelas(payload);
-        if (agendaItems.length > 0) {
-          await Promise.all(
-            agendaItems.map(item =>
-              AkademikAgendaService.createAgenda({
-                kelas_id: created.id,
-                nama_agenda: item.nama_agenda.trim(),
-                jenis: item.jenis,
-                frekuensi: item.frekuensi,
-                hari: item.hari,
-                jam_mulai: item.jam_mulai || null,
-                jam_selesai: item.jam_selesai || null,
-                lokasi: item.lokasi || null,
-                catatan: item.catatan || null,
-                pengajar_id: item.pengajar_id || null,
-                mapel_id: item.mapel_id || null,
-                pengajar_nama: item.pengajar_nama ? item.pengajar_nama.trim() : null,
-                mapel_nama: item.mapel_nama ? item.mapel_nama.trim() : null,
-                kitab: item.kitab ? item.kitab.trim() : null,
-                is_setoran: item.is_setoran,
-                tanggal_mulai: item.tanggal_mulai,
-                tanggal_selesai: item.tanggal_selesai,
-              }),
-            ),
-          );
-        }
-        toast.success(
-          agendaItems.length > 0 ? 'Kelas dan agenda berhasil dibuat' : 'Kelas berhasil dibuat',
-        );
-      }
+      const payload: KelasMasterInput = {
+        ...form,
+        tahun_ajaran: selectedSem.tahun_ajaran?.nama || '',
+        semester: selectedSem.nama,
+        tahun_ajaran_id: selectedSem.tahun_ajaran_id,
+        semester_id: selectedSem.id,
+      };
+      
+      await AkademikKelasService.createKelas(payload);
+      toast.success('Kelas berhasil dibuat. Tambahkan agenda melalui tombol "Kelola Agenda".');
 
       // Reset form
-      setForm({
+      const resetForm: KelasMasterInput = {
         nama_kelas: '',
         program: '',
         rombel: '',
         tingkat: '',
-        tahun_ajaran: activeSemester?.tahun_ajaran?.nama || '',
-        semester: activeSemester?.nama || '',
-        tahun_ajaran_id: activeSemester?.tahun_ajaran_id,
+        tahun_ajaran: '',
+        semester: '',
+        tahun_ajaran_id: undefined,
         semester_id: activeSemester?.id,
         status: 'Aktif'
-      });
-      setRombelMassal('');
-      setAgendaItems([]);
+      };
+      setForm(resetForm);
       loadKelas();
     } catch (e: any) {
       toast.error(e.message || 'Gagal membuat kelas');
@@ -915,27 +838,58 @@ const MasterKelasPage: React.FC = () => {
       <Card>
         <CardHeader>
           <CardTitle>Buat Kelas</CardTitle>
-          <CardDescription>Isi data kelas lalu klik Buat.</CardDescription>
+          <CardDescription>Isi data kelas lalu klik Buat. Agenda bisa ditambahkan setelah kelas dibuat.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <Label>Semester *</Label>
+              <Select
+                value={form.semester_id || undefined}
+                onValueChange={(value) => {
+                  const selectedSem = allSemesters.find(s => s.id === value);
+                  if (selectedSem) {
+                    setForm({
+                      ...form,
+                      semester_id: selectedSem.id,
+                      semester: selectedSem.nama,
+                      tahun_ajaran_id: selectedSem.tahun_ajaran_id,
+                      tahun_ajaran: selectedSem.tahun_ajaran?.nama || '',
+                    });
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih semester" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allSemesters.map(sem => (
+                    <SelectItem key={sem.id} value={sem.id}>
+                      {sem.nama} • {sem.tahun_ajaran?.nama || '-'}
+                      {sem.is_aktif && ' (Aktif)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Tahun ajaran akan terisi otomatis
+              </p>
+            </div>
             <div>
               <Label>Program *</Label>
               <Input
                 value={form.program}
                 onChange={(e) => handleFormChange('program', e.target.value)}
-                placeholder="Contoh: Madin, TPQ, Tahfid, Tahsin"
+                placeholder="Contoh: Madin, TPQ, Tahfid"
               />
-              <p className="text-xs text-muted-foreground mt-1">Nama program (bebas)</p>
             </div>
             <div>
               <Label>Tingkat</Label>
               <Input
                 value={form.tingkat}
                 onChange={(e) => handleFormChange('tingkat', e.target.value)}
-                placeholder="Contoh: I'dad, Wustho, Iqra 1, Juz 1"
+                placeholder="Contoh: I'dad, Wustho, Iqra 1"
               />
-              <p className="text-xs text-muted-foreground mt-1">Tingkat/level kelas (opsional)</p>
             </div>
             <div>
               <Label>Rombel</Label>
@@ -944,10 +898,9 @@ const MasterKelasPage: React.FC = () => {
                 onChange={(e) => handleFormChange('rombel', e.target.value)}
                 placeholder="Contoh: A, B, C"
               />
-              <p className="text-xs text-muted-foreground mt-1">Rombongan belajar (opsional)</p>
             </div>
-            <div className="md:col-span-2 lg:col-span-3 space-y-2">
-              <div className="flex items-center gap-2">
+            <div className="md:col-span-2">
+              <div className="flex items-center gap-2 mb-2">
                 <Checkbox
                   id="auto-generate"
                   checked={autoGenerateName}
@@ -966,101 +919,28 @@ const MasterKelasPage: React.FC = () => {
                     }
                   }}
                 />
-                <Label htmlFor="auto-generate" className="cursor-pointer">
-                  Auto-generate nama kelas dari Program + Tingkat + Rombel
+                <Label htmlFor="auto-generate" className="cursor-pointer text-sm">
+                  Auto-generate nama dari Program + Tingkat + Rombel
                 </Label>
               </div>
-              <div>
-                <Label>Nama Kelas *</Label>
-                <Input
-                  value={form.nama_kelas}
-                  onChange={(e) => setForm({ ...form, nama_kelas: e.target.value })}
-                  placeholder="Contoh: Madin I'dad A"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Nama lengkap kelas (bisa diedit manual)
-                </p>
-              </div>
-            </div>
-            <div>
-              <Label>Tahun Ajaran</Label>
+              <Label>Nama Kelas *</Label>
               <Input
-                value={form.tahun_ajaran}
-                onChange={(e) => handleFormChange('tahun_ajaran', e.target.value)}
-                placeholder="2024/2025"
-              />
-            </div>
-            <div>
-              <Label>Semester</Label>
-              <Input
-                value={form.semester}
-                onChange={(e) => handleFormChange('semester', e.target.value)}
-                placeholder="Ganjil atau Genap"
+                value={form.nama_kelas}
+                onChange={(e) => setForm({ ...form, nama_kelas: e.target.value })}
+                placeholder="Contoh: Madin I'dad A"
               />
             </div>
           </div>
 
-          <div className="border-t pt-4 space-y-2">
-            <Label>Rombel Massal (opsional)</Label>
-            <Input
-              value={rombelMassal}
-              onChange={(e) => setRombelMassal(e.target.value)}
-              placeholder="Contoh: A,B,C"
-            />
-            <p className="text-xs text-muted-foreground">
-              Pisahkan dengan koma untuk membuat banyak kelas sekaligus dengan rombel berbeda.
-            </p>
-          </div>
-
-          <div className="border rounded-lg p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold">Agenda Kelas</h3>
-                <p className="text-sm text-muted-foreground">
-                  Tentukan jadwal pertemuan, pengajar, dan mapel untuk kelas ini.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button onClick={handleAddAgenda} variant="outline" size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Agenda Tunggal
-                </Button>
-                <Button
-                  onClick={() => {
-                    resetTemplateForm();
-                    openTemplateDialog('create');
-                  }}
-                  variant="outline"
-                  size="sm"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Agenda Multi Hari
-                </Button>
-              </div>
-            </div>
-
-            {agendaItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Belum ada agenda. Klik &quot;Tambah Agenda&quot; untuk menambahkan jadwal kelas.
-              </p>
-            ) : (
-              <AgendaItemsList
-                items={agendaItems}
-                onRemove={handleRemoveAgenda}
-                onChange={handleAgendaChange}
-              />
-            )}
-            {agendaItems.length > 0 && agendaValidationErrors.length > 0 && (
-              <p className="text-xs text-red-500">{agendaValidationErrors[0]}</p>
-            )}
-          </div>
-
-          <div className="flex justify-end">
-            <Button onClick={handleCreate} className="gap-2">
+          <div className="flex justify-end pt-2">
+            <Button onClick={handleCreate} className="gap-2" disabled={!form.semester_id || !form.program || !form.nama_kelas}>
               <Plus className="w-4 h-4" />
               Buat Kelas
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground text-center">
+            Agenda kelas bisa ditambahkan setelah kelas dibuat melalui tombol "Kelola Agenda"
+          </p>
         </CardContent>
       </Card>
 
@@ -1103,14 +983,10 @@ const MasterKelasPage: React.FC = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nama</TableHead>
+                  <TableHead>Nama Kelas</TableHead>
                   <TableHead>Program</TableHead>
-                  <TableHead>Rombel</TableHead>
-                  <TableHead>Tingkat</TableHead>
-                  <TableHead>TA/Semester</TableHead>
-                  <TableHead>Agenda Aktif</TableHead>
+                  <TableHead>Semester</TableHead>
                   <TableHead>Anggota</TableHead>
-                  <TableHead>Rencana Semester</TableHead>
                   <TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1127,39 +1003,33 @@ const MasterKelasPage: React.FC = () => {
 
                   return (
                   <TableRow key={row.id}>
-                    <TableCell className="font-medium">{row.nama_kelas}</TableCell>
-                    <TableCell>{row.program}</TableCell>
-                    <TableCell>{row.rombel || '-'}</TableCell>
-                    <TableCell>{row.tingkat || '-'}</TableCell>
-                    <TableCell>{row.tahun_ajaran} / {row.semester}</TableCell>
-                    <TableCell>{row.jumlah_agenda || 0}</TableCell>
-                    <TableCell>{row.jumlah_anggota}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="font-semibold">{row.nama_kelas}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        {row.rombel && (
+                          <Badge variant="outline" className="text-xs">Rombel: {row.rombel}</Badge>
+                        )}
+                        {row.tingkat && (
+                          <Badge variant="outline" className="text-xs">Tingkat: {row.tingkat}</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
-                      {summaryLoading && summaries.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">Memuat...</span>
-                      ) : totalTarget > 0 ? (
-                        <div className="space-y-1">
-                          <div className="font-semibold text-sm">
-                            {totalSelesai} / {totalTarget} selesai
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {totalBerjalan > 0 ? `${totalBerjalan} pertemuan berjalan • ` : ''}
-                            {totalOutstanding > 0 ? `${totalOutstanding} tersisa` : 'Target tercapai'}
-                          </p>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">-</span>
+                      <div className="font-medium">{row.program}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium text-sm">{row.semester}</div>
+                      <div className="text-xs text-muted-foreground">{row.tahun_ajaran}</div>
+                      {row.semester_id === activeSemester?.id && (
+                        <Badge className="mt-1 text-xs bg-green-100 text-green-800">Aktif</Badge>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium">{row.jumlah_anggota || 0}</div>
+                      <div className="text-xs text-muted-foreground">santri</div>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => openDetailDialog(row)}
-                        >
-                          Detail
-                        </Button>
                         <Button
                           variant="outline"
                           size="sm"

@@ -16,10 +16,17 @@ import {
   ArrowUpDown,
   Plus,
   Filter,
-  X
+  X,
+  DollarSign,
+  Store,
+  LogOut,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { InventoryItem, Pagination, Sort } from '@/types/inventaris.types';
+import { updateInventoryItem } from '@/services/inventaris.service';
+import { useToast } from '@/hooks/use-toast';
 import ItemForm from './ItemForm';
+import KeluarItemDialog from './KeluarItemDialog';
 
 interface ItemListProps {
   data?: InventoryItem[];
@@ -42,11 +49,16 @@ const ItemList: React.FC<ItemListProps> = ({
   pagination = { page: 1, pageSize: 10 },
   onPaginationChange = () => {},
   sort = { column: 'nama_barang', direction: 'asc' },
-  onSortChange = () => {}
+  onSortChange = () => {},
 }) => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showKeluarDialog, setShowKeluarDialog] = useState(false);
+  const [itemToKeluar, setItemToKeluar] = useState<InventoryItem | undefined>(undefined);
   const [filters, setFilters] = useState({
     search: '',
     kategori: 'all',
@@ -68,6 +80,43 @@ const ItemList: React.FC<ItemListProps> = ({
     if (qty === 0) return 'Habis';
     if (qty < 10) return qty.toString(); // Single digit, no leading zero
     return qty.toString();
+  };
+
+  const handleToggleBolehJual = async (item: InventoryItem) => {
+    if (item.tipe_item !== 'Komoditas') {
+      toast({
+        title: 'Tidak bisa diizinkan',
+        description: 'Hanya item bertipe Komoditas yang bisa dijual di koperasi.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setUpdatingId(item.id);
+      const next = !item.boleh_dijual_koperasi;
+
+      await updateInventoryItem(item.id, { boleh_dijual_koperasi: next });
+
+      toast({
+        title: next ? 'Diizinkan dijual' : 'Dihapus dari kasir',
+        description: next
+          ? 'Item akan muncul di tab Item Yayasan (Master Produk Koperasi) setelah Anda atur harga.'
+          : 'Item tidak akan muncul lagi di kasir koperasi.',
+      });
+
+      // Minta parent refresh data (InventarisMasterPage memetakan onAdd ke fetchInventoryData)
+      if (onAdd) onAdd();
+    } catch (error) {
+      console.error('Error toggling boleh_dijual_koperasi:', error);
+      toast({
+        title: 'Gagal mengubah status jual',
+        description: 'Silakan coba lagi.',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
   // Get unique values for filters
@@ -357,12 +406,12 @@ const ItemList: React.FC<ItemListProps> = ({
         </CardHeader>
         <CardContent>
         {/* Desktop Table View - Compact & Elegant */}
-        <div className="hidden md:block border border-gray-200 rounded-lg bg-white overflow-hidden">
+        <div className="hidden md:block border border-gray-200 rounded-xl bg-white overflow-hidden shadow-sm">
           <Table>
             <TableHeader>
-              <TableRow className="bg-gray-50/50">
+              <TableRow className="bg-gray-50/80">
                 <TableHead 
-                  className="cursor-pointer hover:bg-gray-100 font-semibold"
+                  className="cursor-pointer hover:bg-gray-100/80 font-semibold text-xs uppercase tracking-wide text-gray-600"
                   onClick={() => handleSort('nama_barang')}
                 >
                   <div className="flex items-center gap-1">
@@ -370,12 +419,13 @@ const ItemList: React.FC<ItemListProps> = ({
                     <ArrowUpDown className="h-3.5 w-3.5" />
                   </div>
                 </TableHead>
-                <TableHead className="font-semibold">Tipe</TableHead>
-                <TableHead className="font-semibold">Kategori</TableHead>
-                <TableHead className="font-semibold">Lokasi</TableHead>
-                <TableHead className="font-semibold">Kondisi</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Tipe</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Owner</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Kategori</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Lokasi</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Kondisi</TableHead>
                 <TableHead 
-                  className="cursor-pointer hover:bg-gray-100 font-semibold"
+                  className="cursor-pointer hover:bg-gray-100/80 font-semibold text-xs uppercase tracking-wide text-gray-600"
                   onClick={() => handleSort('jumlah')}
                 >
                   <div className="flex items-center gap-1">
@@ -383,31 +433,78 @@ const ItemList: React.FC<ItemListProps> = ({
                     <ArrowUpDown className="h-3.5 w-3.5" />
                   </div>
                 </TableHead>
-                <TableHead className="font-semibold">Status</TableHead>
-                <TableHead className="font-semibold">Harga</TableHead>
-                <TableHead className="font-semibold">Expiry</TableHead>
-                <TableHead className="text-right font-semibold">Aksi</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Status</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Harga</TableHead>
+                <TableHead className="font-semibold text-xs uppercase tracking-wide text-gray-600">Expiry</TableHead>
+                <TableHead className="text-right font-semibold text-xs uppercase tracking-wide text-gray-600">Aksi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredData.map((item) => (
-                <TableRow key={item.id} className="hover:bg-gray-50/50">
+              {filteredData.map((item, index) => (
+                <TableRow
+                  key={item.id}
+                  className={`
+                    hover:bg-gray-50/80 transition-colors
+                    ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}
+                  `}
+                >
                   <TableCell className="font-medium">
-                    <div>
-                      <div className="font-semibold text-gray-900">{item.nama_barang}</div>
+                    <div className="flex flex-col">
+                      <div className="font-semibold text-gray-900 flex items-center gap-2">
+                        <span>{item.nama_barang}</span>
+                        {/* Icon status koperasi (klik untuk toggle izin jual) */}
+                        {item.tipe_item === 'Komoditas' && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleBolehJual(item)}
+                            disabled={updatingId === item.id}
+                            className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full border border-transparent hover:border-emerald-200 hover:bg-emerald-50/60 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                            title={
+                              item.boleh_dijual_koperasi
+                                ? 'Klik untuk menonaktifkan penjualan di koperasi'
+                                : 'Klik untuk mengizinkan penjualan di koperasi'
+                            }
+                          >
+                            <Store
+                              className={
+                                item.boleh_dijual_koperasi
+                                  ? 'w-3.5 h-3.5 text-emerald-600'
+                                  : 'w-3.5 h-3.5 text-gray-300'
+                              }
+                            />
+                            <span className="hidden sm:inline">
+                              {item.boleh_dijual_koperasi ? 'Dijual' : 'Tidak dijual'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                      {item.kode_inventaris && (
+                        <span className="mt-0.5 text-[10px] font-mono text-gray-400">
+                          {item.kode_inventaris}
+                        </span>
+                      )}
                       {item.sumber && (
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <span className="mt-0.5 text-[11px] text-gray-500">
                           {item.sumber}
-                        </div>
+                        </span>
                       )}
                     </div>
                   </TableCell>
                   <TableCell>{getTipeBadge(item.tipe_item)}</TableCell>
-                  <TableCell className="text-sm text-gray-700">{item.kategori}</TableCell>
                   <TableCell>
-                    <div>
-                      <div className="font-medium text-sm text-gray-900">{item.zona}</div>
-                      <div className="text-xs text-gray-500">{item.lokasi}</div>
+                    <Badge variant={item.owner_type === 'koperasi' ? 'default' : 'outline'} className="text-xs">
+                      {item.owner_type === 'koperasi' ? 'Koperasi' : 'Yayasan'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-700">{item.kategori}</TableCell>
+                  <TableCell className="text-sm">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-gray-900">{item.zona}</span>
+                      {item.lokasi && (
+                        <span className="text-xs text-gray-500 truncate max-w-[180px]">
+                          {item.lokasi}
+                        </span>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>{getKondisiBadge(item.kondisi)}</TableCell>
@@ -419,59 +516,60 @@ const ItemList: React.FC<ItemListProps> = ({
                   <TableCell>
                     {getStockStatus(item.jumlah || 0, item.min_stock || 10)}
                   </TableCell>
-                  <TableCell className="text-sm text-gray-700">
+                  <TableCell className="text-sm text-gray-700 whitespace-nowrap">
                     {item.harga_perolehan ? formatRupiah(item.harga_perolehan) : '-'}
                   </TableCell>
                   <TableCell>
                     {item.has_expiry && item.tanggal_kedaluwarsa ? (
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          <span className="text-sm">
-                            {new Date(item.tanggal_kedaluwarsa).toLocaleDateString('id-ID')}
-                          </span>
-                        </div>
-                        {(() => {
-                          const today = new Date();
-                          today.setHours(0, 0, 0, 0);
-                          const expiry = new Date(item.tanggal_kedaluwarsa);
-                          expiry.setHours(0, 0, 0, 0);
-                          const diffTime = expiry.getTime() - today.getTime();
-                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          
-                          if (diffDays < 0) {
-                            return (
-                              <Badge variant="destructive" className="text-xs w-fit">
-                                Kadaluarsa ({Math.abs(diffDays)} hari lalu)
-                              </Badge>
-                            );
-                          } else if (diffDays <= 7) {
-                            return (
-                              <Badge variant="destructive" className="text-xs w-fit">
-                                {diffDays} hari lagi
-                              </Badge>
-                            );
-                          } else if (diffDays <= 30) {
-                            return (
-                              <Badge variant="secondary" className="text-xs w-fit">
-                                {diffDays} hari lagi
-                              </Badge>
-                            );
-                          } else {
-                            return (
-                              <span className="text-xs text-muted-foreground">
-                                {diffDays} hari lagi
+                      (() => {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const expiry = new Date(item.tanggal_kedaluwarsa);
+                        expiry.setHours(0, 0, 0, 0);
+                        const diffTime = expiry.getTime() - today.getTime();
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                        const dateLabel = expiry.toLocaleDateString('id-ID');
+
+                        if (diffDays < 0) {
+                          return (
+                            <div className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5">
+                              <Clock className="h-3 w-3 text-red-500" />
+                              <span className="text-[11px] font-medium text-red-600">
+                                Kadaluarsa
                               </span>
-                            );
-                          }
-                        })()}
-                      </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-gray-400" />
+                            <span className="text-xs text-gray-700">{dateLabel}</span>
+                          </div>
+                        );
+                      })()
                     ) : (
-                      '-'
+                      <span className="text-xs text-gray-400">-</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      {/* Icon Pengeluaran - hanya untuk item dengan stock > 0 */}
+                      {item.jumlah && item.jumlah > 0 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setItemToKeluar(item);
+                            setShowKeluarDialog(true);
+                          }}
+                          className="h-7 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title="Pengeluaran Item"
+                        >
+                          <LogOut className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -511,13 +609,46 @@ const ItemList: React.FC<ItemListProps> = ({
                 <div className="flex justify-between items-start mb-2.5">
                   <div className="flex-1">
                     <h3 className="font-semibold text-sm text-gray-900">{item.nama_barang}</h3>
-                    {item.sumber && (
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {item.sumber}
-                      </p>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      {item.kode_inventaris && (
+                        <span className="text-xs font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                          {item.kode_inventaris}
+                        </span>
+                      )}
+                      {item.is_komoditas && (
+                        <Badge variant="outline" className="text-xs">Komoditas</Badge>
+                      )}
+                      {item.boleh_dijual_koperasi && (
+                        <Badge variant="default" className="text-xs">Boleh Dijual</Badge>
+                      )}
+                      {item.owner_type && (
+                        <Badge variant={item.owner_type === 'koperasi' ? 'default' : 'outline'} className="text-xs">
+                          {item.owner_type === 'koperasi' ? 'Koperasi' : 'Yayasan'}
+                        </Badge>
+                      )}
+                      {item.sumber && (
+                        <span className="text-xs text-gray-500">
+                          {item.sumber}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex gap-1 ml-2">
+                    {/* Icon Pengeluaran - hanya untuk item dengan stock > 0 */}
+                    {item.jumlah && item.jumlah > 0 && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setItemToKeluar(item);
+                          setShowKeluarDialog(true);
+                        }}
+                        className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        title="Pengeluaran Item"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -687,6 +818,19 @@ const ItemList: React.FC<ItemListProps> = ({
         )}
       </CardContent>
     </Card>
+
+    {/* Keluar Item Dialog */}
+    <KeluarItemDialog
+      open={showKeluarDialog}
+      onClose={() => {
+        setShowKeluarDialog(false);
+        setItemToKeluar(undefined);
+      }}
+      item={itemToKeluar || null}
+      onSuccess={() => {
+        if (onAdd) onAdd();
+      }}
+    />
 
     {/* Item Form Modal */}
     {showItemForm && (

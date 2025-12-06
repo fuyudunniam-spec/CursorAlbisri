@@ -181,8 +181,8 @@ const DashboardAkademik: React.FC = () => {
                 key: agendaKey,
                 tanggal: row.tanggal,
                 agenda: row.agenda?.nama_agenda || 'Input Manual',
-                pengajar: row.agenda?.pengajar_nama || row.agenda?.pengajar?.nama_lengkap || null,
-                mapel: row.agenda?.mapel_nama || row.agenda?.mapel?.nama_mapel || null,
+                pengajar: row.agenda?.pengajar_nama || null,
+                mapel: row.agenda?.mapel_nama || null,
                 kitab: row.agenda?.kitab || null,
                 counts: {
                   Hadir: 0,

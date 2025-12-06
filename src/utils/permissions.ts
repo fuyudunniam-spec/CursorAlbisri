@@ -8,6 +8,9 @@ export type AppRole =
   | 'admin_keuangan' 
   | 'admin_inventaris' 
   | 'admin_akademik' 
+  | 'koperasi_admin'
+  | 'koperasi_kasir'
+  | 'koperasi_staff'
   | 'pengurus' 
   | 'pengajar'
   | 'santri';
@@ -22,6 +25,7 @@ export type ModuleName =
   | 'inventaris'
   | 'distribusi'
   | 'penjualan'
+  | 'koperasi'
   | 'monitoring'
   | 'plotting'
   | 'settings';
@@ -33,8 +37,11 @@ export type ModuleName =
 const PERMISSION_MATRIX: Record<AppRole, string[] | '*' > = {
   admin: '*', // Full access to all modules
   admin_keuangan: ['dashboard', 'keuangan', 'pembayaran', 'tabungan', 'donasi', 'settings'],
-  admin_inventaris: ['dashboard', 'inventaris', 'distribusi', 'penjualan', 'settings'],
+  admin_inventaris: ['dashboard', 'inventaris', 'distribusi', 'settings'], // Sales removed - now handled by koperasi
   admin_akademik: ['dashboard', 'santri', 'monitoring', 'plotting', 'settings'],
+  koperasi_admin: ['dashboard', 'koperasi', 'settings'], // Full access to koperasi
+  koperasi_kasir: ['dashboard', 'koperasi', 'settings'], // Kasir access (limited in UI)
+  koperasi_staff: ['dashboard', 'koperasi', 'settings'], // Staff access (limited in UI)
   pengurus: ['dashboard', 'santri', 'keuangan', 'donasi', 'inventaris', 'monitoring', 'settings'], // Read-only access
   pengajar: ['dashboard', 'monitoring', 'settings'], // Access to akademik modules (jurnal, presensi)
   santri: ['dashboard', 'tabungan', 'settings'], // Limited access
@@ -54,9 +61,16 @@ const MODULE_PATH_MAP: Record<string, ModuleName> = {
   '/donasi': 'donasi',
   '/inventaris': 'inventaris',
   '/inventaris/master': 'inventaris',
-  '/inventaris/sales': 'penjualan',
+  '/inventaris/sales': 'koperasi', // Redirects to koperasi - sales blocked in yayasan
   '/inventaris/distribution': 'distribusi',
   '/inventaris/transactions': 'inventaris',
+  '/koperasi': 'koperasi',
+  '/koperasi/master': 'koperasi',
+  '/koperasi/kasir': 'koperasi',
+  '/koperasi/inventaris': 'koperasi',
+  '/koperasi/penjualan': 'koperasi',
+  '/koperasi/keuangan': 'koperasi',
+  '/koperasi/laporan': 'koperasi',
   '/monitoring': 'monitoring',
   '/ploating-kelas': 'plotting',
   '/akademik/master': 'plotting',

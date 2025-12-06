@@ -89,7 +89,7 @@ const PenjualanPage = () => {
   const tabs = [
     { label: 'Dashboard', path: '/inventaris' },
     { label: 'Master Data', path: '/inventaris/master' },
-    { label: 'Penjualan', path: '/inventaris/sales' },
+    { label: 'Transfer', path: '/inventaris/transfer' },
     { label: 'Distribusi', path: '/inventaris/distribution' }
   ];
 
@@ -490,35 +490,60 @@ const PenjualanPage = () => {
       return;
     }
     
-    // Type detection: Check for type === 'multi' OR penjualan_header_id
-    const isMultiItem = sale.type === 'multi' || !!sale.penjualan_header_id;
-    console.log('[DEBUG] Type detection - isMultiItem:', isMultiItem, 'type:', sale.type, 'penjualan_header_id:', sale.penjualan_header_id);
+    // Type detection: Check multiple indicators for multi-item sales
+    // 1. type === 'multi' (from getCombinedSalesHistory)
+    // 2. penjualan_header_id exists (from transaksi_inventaris)
+    // 3. itemCount > 1 (from getCombinedSalesHistory)
+    // 4. items array exists (from penjualan_headers direct data)
+    // 5. grand_total exists (from penjualan_headers)
+    const isMultiItem = 
+      sale.type === 'multi' || 
+      !!sale.penjualan_header_id || 
+      (sale.itemCount && sale.itemCount > 1) ||
+      (sale.items && Array.isArray(sale.items) && sale.items.length > 0) ||
+      (sale.grand_total !== undefined && !sale.item_id);
+    
+    console.log('[DEBUG] Type detection - isMultiItem:', isMultiItem, {
+      type: sale.type,
+      penjualan_header_id: sale.penjualan_header_id,
+      itemCount: sale.itemCount,
+      hasItems: sale.items && Array.isArray(sale.items),
+      itemsLength: sale.items?.length,
+      hasGrandTotal: sale.grand_total !== undefined,
+      hasItemId: !!sale.item_id
+    });
     
     if (isMultiItem) {
       // Load multi-item sale data
       try {
         console.log('[DEBUG] Loading multi-item sale for edit:', sale.id);
         
-        // Add try-catch around data loading operation
+        // Check if sale already has items array (direct from penjualan_headers)
         let saleDetail;
-        try {
-          saleDetail = await getMultiItemSale(sale.id);
-        } catch (loadError: any) {
-          console.error('[ERROR] Failed to load multi-item sale:', loadError);
-          
-          // Handle "transaction not found" errors with user-friendly messages
-          if (loadError.message?.includes('not found') || loadError.code === 'PGRST116') {
-            toast.error('Transaksi tidak ditemukan', {
-              description: 'Transaksi yang Anda cari tidak ada atau telah dihapus'
-            });
-          } else {
-            toast.error('Gagal memuat data transaksi', {
-              description: loadError.message || 'Terjadi kesalahan saat mengambil data'
-            });
+        if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
+          console.log('[DEBUG] Using existing items data from sale object');
+          saleDetail = sale; // Use the sale object directly if it already has items
+        } else {
+          // Fetch from API if items not present
+          try {
+            saleDetail = await getMultiItemSale(sale.id);
+          } catch (loadError: any) {
+            console.error('[ERROR] Failed to load multi-item sale:', loadError);
+            
+            // Handle "transaction not found" errors with user-friendly messages
+            if (loadError.message?.includes('not found') || loadError.code === 'PGRST116') {
+              toast.error('Transaksi tidak ditemukan', {
+                description: 'Transaksi yang Anda cari tidak ada atau telah dihapus'
+              });
+            } else {
+              toast.error('Gagal memuat data transaksi', {
+                description: loadError.message || 'Terjadi kesalahan saat mengambil data'
+              });
+            }
+            
+            // Prevent form display when data is invalid or incomplete
+            return;
           }
-          
-          // Prevent form display when data is invalid or incomplete
-          return;
         }
         
         console.log('[DEBUG] Sale detail loaded:', saleDetail);
@@ -656,10 +681,11 @@ const PenjualanPage = () => {
       console.log('[DEBUG] Loading single-item sale for edit');
       
       try {
-        // Validate item_id exists
-        const itemId = sale.item_id;
+        // Validate item_id exists - check originalData first for getCombinedSalesHistory format
+        const itemId = sale.item_id || sale.originalData?.item_id;
         if (!itemId) {
           console.error('[ERROR] Invalid transaction data - missing item_id');
+          console.error('[ERROR] Sale object:', sale);
           toast.error('Data transaksi tidak valid', {
             description: 'ID item tidak ditemukan dalam transaksi'
           });

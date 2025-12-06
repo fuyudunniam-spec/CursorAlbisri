@@ -16,7 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Calendar, Plus, Edit, Trash2, BookOpen, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { Calendar, Plus, Edit, Trash2, BookOpen, CheckCircle2, AlertCircle, Clock, Users, CalendarDays } from 'lucide-react';
 
 type ProgramValue = 'Madin' | 'TPQ' | 'Tahfid' | 'Tahsin' | 'Semua';
 
@@ -80,6 +80,11 @@ const JurnalPertemuanPage: React.FC = () => {
     materi: '',
     catatan: '',
   });
+  const [quickEditDialog, setQuickEditDialog] = useState<{ open: boolean; pertemuan: KelasPertemuan | null }>({
+    open: false,
+    pertemuan: null,
+  });
+  const [quickEditTanggal, setQuickEditTanggal] = useState('');
 
   const loadSemesters = useCallback(async () => {
     try {
@@ -346,12 +351,53 @@ const JurnalPertemuanPage: React.FC = () => {
     navigate(`/akademik/setoran?${params.toString()}`);
   };
 
+  // Quick action: Tandai selesai
+  const handleQuickMarkSelesai = async (pertemuan: KelasPertemuan) => {
+    if (pertemuan.status === 'Selesai') {
+      toast.info('Pertemuan sudah selesai');
+      return;
+    }
+    try {
+      await AkademikPertemuanService.updatePertemuan(pertemuan.id, {
+        status: 'Selesai',
+      });
+      toast.success('Pertemuan ditandai selesai');
+      loadPertemuan();
+    } catch (error: any) {
+      toast.error(error.message || 'Gagal memperbarui status');
+    }
+  };
+
+  // Quick action: Edit jadwal (hanya tanggal)
+  const handleQuickEditJadwal = async (pertemuan: KelasPertemuan, newTanggal: string) => {
+    try {
+      await AkademikPertemuanService.updatePertemuan(pertemuan.id, {
+        tanggal: newTanggal,
+      });
+      toast.success('Jadwal diperbarui');
+      loadPertemuan();
+    } catch (error: any) {
+      toast.error(error.message || 'Gagal memperbarui jadwal');
+    }
+  };
+
+  const handleOpenQuickEditJadwal = (pertemuan: KelasPertemuan) => {
+    setQuickEditDialog({ open: true, pertemuan });
+    setQuickEditTanggal(pertemuan.tanggal);
+  };
+
+  const handleSaveQuickEditJadwal = async () => {
+    if (!quickEditDialog.pertemuan) return;
+    await handleQuickEditJadwal(quickEditDialog.pertemuan, quickEditTanggal);
+    setQuickEditDialog({ open: false, pertemuan: null });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Jurnal Pertemuan</h1>
-          <p className="text-muted-foreground">Kelola dan catat pertemuan per agenda secara terpusat.</p>
+          <h2 className="text-xl font-semibold">Jurnal Pertemuan</h2>
+          <p className="text-sm text-muted-foreground">Kelola dan catat pertemuan per agenda secara terpusat.</p>
         </div>
         <Button onClick={() => handleOpenDialog()}>
           <Plus className="w-4 h-4 mr-2" />
@@ -469,9 +515,45 @@ const JurnalPertemuanPage: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         <div className="space-y-1">
-                          {/* Nama agenda atau mapel (prioritas mapel jika ada) */}
-                          <div className="font-semibold">
-                            {pertemuan.agenda?.mapel_nama || pertemuan.agenda?.mapel?.nama_mapel || pertemuan.agenda?.nama_agenda || '-'}
+                          {/* Nama agenda atau mapel dengan quick actions */}
+                          <div className="flex items-center gap-2">
+                            <div className="font-semibold flex-1">
+                              {pertemuan.agenda?.mapel_nama || pertemuan.agenda?.mapel?.nama_mapel || pertemuan.agenda?.nama_agenda || '-'}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {/* Quick action: Tandai Selesai */}
+                              {pertemuan.status !== 'Selesai' && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-7 w-7"
+                                  onClick={() => handleQuickMarkSelesai(pertemuan)}
+                                  title="Tandai selesai"
+                                >
+                                  <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                </Button>
+                              )}
+                              {/* Quick action: Absensi */}
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => handleGoToAbsensi(pertemuan)}
+                                title="Input absensi"
+                              >
+                                <Users className="w-4 h-4 text-blue-600" />
+                              </Button>
+                              {/* Quick action: Edit Jadwal */}
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => handleOpenQuickEditJadwal(pertemuan)}
+                                title="Edit jadwal (tanggal)"
+                              >
+                                <CalendarDays className="w-4 h-4 text-orange-600" />
+                              </Button>
+                            </div>
                           </div>
                           
                           {/* Tampilkan nama agenda hanya jika berbeda dengan mapel */}
@@ -525,21 +607,24 @@ const JurnalPertemuanPage: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleGoToAbsensi(pertemuan)}
-                          >
-                            Absensi
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
                             onClick={() => handleGoToSetoran(pertemuan)}
                           >
                             Setoran
                           </Button>
-                          <Button size="icon" variant="ghost" onClick={() => handleOpenDialog(pertemuan)}>
+                          <Button 
+                            size="icon" 
+                            variant="ghost" 
+                            onClick={() => handleOpenDialog(pertemuan)}
+                            title="Edit lengkap"
+                          >
                             <Edit className="w-4 h-4 text-blue-600" />
                           </Button>
-                          <Button size="icon" variant="ghost" onClick={() => handleDeletePertemuan(pertemuan.id)}>
+                          <Button 
+                            size="icon" 
+                            variant="ghost" 
+                            onClick={() => handleDeletePertemuan(pertemuan.id)}
+                            title="Hapus"
+                          >
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </Button>
                         </div>
@@ -637,6 +722,42 @@ const JurnalPertemuanPage: React.FC = () => {
             </Button>
             <Button onClick={handleSavePertemuan}>
               Simpan Pertemuan
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Quick Edit Jadwal */}
+      <Dialog open={quickEditDialog.open} onOpenChange={(open) => setQuickEditDialog({ open, pertemuan: null })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Jadwal Pertemuan</DialogTitle>
+            <DialogDescription>
+              Ubah tanggal pertemuan. Agenda dan pengaturan lain tetap sama.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Tanggal Baru *</Label>
+              <Input
+                type="date"
+                value={quickEditTanggal}
+                onChange={(e) => setQuickEditTanggal(e.target.value)}
+              />
+            </div>
+            {quickEditDialog.pertemuan && (
+              <div className="text-sm text-muted-foreground">
+                <p>Agenda: {quickEditDialog.pertemuan.agenda?.mapel_nama || quickEditDialog.pertemuan.agenda?.nama_agenda || '-'}</p>
+                <p>Tanggal lama: {new Date(quickEditDialog.pertemuan.tanggal).toLocaleDateString('id-ID')}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickEditDialog({ open: false, pertemuan: null })}>
+              Batal
+            </Button>
+            <Button onClick={handleSaveQuickEditJadwal} disabled={!quickEditTanggal}>
+              Simpan
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -86,7 +86,7 @@ const DistribusiPage = () => {
   const tabs = [
     { label: 'Dashboard', path: '/inventaris' },
     { label: 'Master Data', path: '/inventaris/master' },
-    { label: 'Penjualan', path: '/inventaris/sales' },
+    { label: 'Transfer', path: '/inventaris/transfer' },
     { label: 'Distribusi', path: '/inventaris/distribution' },
     { label: 'Master Paket', path: '/inventaris/distribution/master-paket' },
   ];

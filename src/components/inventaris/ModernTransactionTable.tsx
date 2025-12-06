@@ -127,15 +127,12 @@ const ModernTransactionTable = memo(({
             <TableHead className="min-w-[200px]">Item</TableHead>
             <TableHead className="w-[100px]">Tipe</TableHead>
             <TableHead className="w-[100px] text-right">Jumlah</TableHead>
-            <TableHead className="w-[120px] text-right hidden md:table-cell">Harga</TableHead>
-            <TableHead className="w-[120px] text-right hidden md:table-cell">Total</TableHead>
-            <TableHead className="w-[120px] hidden lg:table-cell">Penerima</TableHead>
+            <TableHead className="w-[120px]">Tujuan</TableHead>
             <TableHead className="w-[100px] text-right">Aksi</TableHead>
           </TableRow>
         </TableHeader>
           <TableBody>
             {rows.map((row) => {
-              const totalValue = (row.jumlah || 0) * (row.harga_satuan || 0);
               const stockChange = getStockChange(row);
               
               return (
@@ -181,17 +178,7 @@ const ModernTransactionTable = memo(({
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="w-[120px] text-right hidden md:table-cell">
-                    <div className="text-sm">
-                      {row.harga_satuan ? formatRupiah(row.harga_satuan) : "-"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="w-[120px] text-right hidden md:table-cell">
-                    <div className="font-medium text-sm">
-                      {totalValue > 0 ? formatRupiah(totalValue) : "-"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="w-[120px] hidden lg:table-cell">
+                  <TableCell className="w-[120px]">
                     {row.penerima ? (
                       <div className="flex items-center space-x-1">
                         <User className="h-3 w-3 text-gray-400" />
@@ -199,8 +186,10 @@ const ModernTransactionTable = memo(({
                           {row.penerima}
                         </span>
                       </div>
+                    ) : row.tipe === "Masuk" ? (
+                      <span className="text-sm text-gray-600">Pembelian</span>
                     ) : (
-                      <span className="text-gray-400 text-sm">-</span>
+                      <span className="text-sm text-gray-400">-</span>
                     )}
                   </TableCell>
                   <TableCell className="w-[100px] text-right">

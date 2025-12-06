@@ -549,28 +549,6 @@ const SemesterManagementPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Kode (Opsional)</Label>
-                <Input
-                  value={yearForm.kode || ''}
-                  onChange={(e) => setYearForm(prev => ({ ...prev, kode: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label>Status</Label>
-                <Select
-                  value={yearForm.status || 'Aktif'}
-                  onValueChange={(value) => setYearForm(prev => ({ ...prev, status: value as TahunAjaranInput['status'] }))}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Aktif">Aktif</SelectItem>
-                    <SelectItem value="Ditutup">Ditutup</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
                 <Label>Tanggal Mulai *</Label>
                 <Input
                   type="date"
@@ -599,14 +577,6 @@ const SemesterManagementPage: React.FC = () => {
               <Label htmlFor="year-active" className="text-sm cursor-pointer">
                 Jadikan tahun ajaran aktif setelah dibuat
               </Label>
-            </div>
-            <div>
-              <Label>Catatan</Label>
-              <Input
-                value={yearForm.catatan || ''}
-                onChange={(e) => setYearForm(prev => ({ ...prev, catatan: e.target.value }))}
-                placeholder="Catatan tambahan"
-              />
             </div>
           </div>
           <DialogFooter>
@@ -656,8 +626,9 @@ const SemesterManagementPage: React.FC = () => {
             <div>
               <Label>Tahun Ajaran *</Label>
               <Select
-                value={semesterForm.tahun_ajaran_id}
+                value={semesterForm.tahun_ajaran_id || undefined}
                 onValueChange={(value) => setSemesterForm(prev => ({ ...prev, tahun_ajaran_id: value }))}
+                disabled={!!createSemesterDialog.tahunId}
               >
                 <SelectTrigger><SelectValue placeholder="Pilih tahun ajaran" /></SelectTrigger>
                 <SelectContent>
@@ -669,30 +640,21 @@ const SemesterManagementPage: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Semester *</Label>
-                <Select
-                  value={semesterForm.nama}
-                  onValueChange={(value) => setSemesterForm(prev => ({ ...prev, nama: value as SemesterNama }))}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {DEFAULT_SEMESTER_OPTIONS.map(opt => (
-                      <SelectItem key={opt} value={opt}>
-                        {opt}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Kode (opsional)</Label>
-                <Input
-                  value={semesterForm.kode || ''}
-                  onChange={(e) => setSemesterForm(prev => ({ ...prev, kode: e.target.value }))}
-                />
-              </div>
+            <div>
+              <Label>Semester *</Label>
+              <Select
+                value={semesterForm.nama}
+                onValueChange={(value) => setSemesterForm(prev => ({ ...prev, nama: value as SemesterNama }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DEFAULT_SEMESTER_OPTIONS.map(opt => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -713,10 +675,18 @@ const SemesterManagementPage: React.FC = () => {
                 />
               </div>
             </div>
-            <div>
-              <Label>Status</Label>
-              <Select
-                value={semesterForm.status || 'Aktif'}
+            <div className="flex items-center gap-2">
+              <input
+                id="semester-active"
+                type="checkbox"
+                className="h-4 w-4"
+                checked={semesterForm.is_aktif}
+                onChange={(e) => setSemesterForm(prev => ({ ...prev, is_aktif: e.target.checked }))}
+              />
+              <Label htmlFor="semester-active" className="text-sm cursor-pointer">
+                Jadikan semester aktif setelah dibuat
+              </Label>
+            </div>
                 onValueChange={(value) => setSemesterForm(prev => ({ ...prev, status: value as SemesterStatus }))}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -760,14 +730,7 @@ const SemesterManagementPage: React.FC = () => {
                 checked={semesterForm.is_aktif}
                 onChange={(e) => setSemesterForm(prev => ({ ...prev, is_aktif: e.target.checked }))}
               />
-              <Label htmlFor="semester-active" className="text-sm cursor-pointer">Jadikan semester aktif</Label>
-            </div>
-            <div>
-              <Label>Catatan</Label>
-              <Input
-                value={semesterForm.catatan || ''}
-                onChange={(e) => setSemesterForm(prev => ({ ...prev, catatan: e.target.value }))}
-              />
+              <Label htmlFor="semester-active" className="text-sm cursor-pointer">Jadikan semester aktif setelah dibuat</Label>
             </div>
           </div>
           <DialogFooter>

@@ -129,15 +129,12 @@ const CompactTransactionTable = memo(({
                 <TableHead className="min-w-[180px]">Item</TableHead>
                 <TableHead className="w-[80px]">Tipe</TableHead>
                 <TableHead className="w-[80px] text-right">Jumlah</TableHead>
-                <TableHead className="w-[100px] text-right">Harga</TableHead>
-                <TableHead className="w-[100px] text-right">Total</TableHead>
-                <TableHead className="w-[100px]">Penerima</TableHead>
+                <TableHead className="w-[100px]">Tujuan</TableHead>
                 <TableHead className="w-[80px] text-right">Aksi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((row) => {
-                const totalValue = (row.jumlah || 0) * (row.harga_satuan || 0);
                 const stockChange = getStockChange(row);
                 
                 return (
@@ -181,16 +178,6 @@ const CompactTransactionTable = memo(({
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="w-[100px] text-right">
-                      <div className="text-xs">
-                        {row.harga_satuan ? formatRupiah(row.harga_satuan) : "-"}
-                      </div>
-                    </TableCell>
-                    <TableCell className="w-[100px] text-right">
-                      <div className="font-medium text-xs">
-                        {totalValue > 0 ? formatRupiah(totalValue) : "-"}
-                      </div>
-                    </TableCell>
                     <TableCell className="w-[100px]">
                       {row.penerima ? (
                         <div className="flex items-center space-x-1">
@@ -199,8 +186,10 @@ const CompactTransactionTable = memo(({
                             {row.penerima}
                           </span>
                         </div>
+                      ) : row.tipe === "Masuk" ? (
+                        <span className="text-xs text-gray-600">Pembelian</span>
                       ) : (
-                        <span className="text-gray-400 text-xs">-</span>
+                        <span className="text-xs text-gray-400">-</span>
                       )}
                     </TableCell>
                     <TableCell className="w-[80px] text-right">
@@ -246,7 +235,6 @@ const CompactTransactionTable = memo(({
       {/* Mobile Card View */}
       <div className="lg:hidden space-y-3">
         {rows.map((row) => {
-          const totalValue = (row.jumlah || 0) * (row.harga_satuan || 0);
           const stockChange = getStockChange(row);
           
           return (
@@ -318,25 +306,15 @@ const CompactTransactionTable = memo(({
                   </div>
                 </div>
                 <div>
-                  <span className="text-gray-500">Harga:</span>
-                  <div className="font-medium">
-                    {row.harga_satuan ? formatRupiah(row.harga_satuan) : "-"}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-gray-500">Total:</span>
-                  <div className="font-medium">
-                    {totalValue > 0 ? formatRupiah(totalValue) : "-"}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-gray-500">Penerima:</span>
+                  <span className="text-gray-500">Tujuan:</span>
                   <div className="font-medium truncate">
                     {row.penerima ? (
                       <div className="flex items-center space-x-1">
                         <User className="h-3 w-3 text-gray-400" />
                         <span>{row.penerima}</span>
                       </div>
+                    ) : row.tipe === "Masuk" ? (
+                      <span className="text-gray-600">Pembelian</span>
                     ) : (
                       <span className="text-gray-400">-</span>
                     )}

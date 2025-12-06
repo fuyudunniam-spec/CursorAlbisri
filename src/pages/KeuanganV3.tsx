@@ -30,7 +30,9 @@ import { supabase } from '../integrations/supabase/client';
 import { 
   excludeTabunganTransactions, 
   applyTabunganExclusionFilter,
-  normalizeAkunKas 
+  normalizeAkunKas,
+  excludeKoperasiTransactions,
+  excludeKoperasiAccounts
 } from '../utils/keuanganFilters';
 // Service layer untuk chart data (Phase 3 refactoring)
 import { 
@@ -126,8 +128,11 @@ const KeuanganV3: React.FC = () => {
       // Get accounts first
       const accounts = await AkunKasService.getAll();
       
-      // Calculate total saldo from ACTIVE accounts only
-      const totalSaldoAllAccounts = accounts
+      // Filter out accounts managed by tabungan and koperasi modules (using shared utility)
+      const filteredAccounts = excludeKoperasiAccounts(accounts.filter(akun => akun.managed_by !== 'tabungan')) as typeof accounts;
+      
+      // Calculate total saldo from ACTIVE accounts only (excluding tabungan and koperasi)
+      const totalSaldoAllAccounts = filteredAccounts
         .filter(akun => akun.status === 'aktif')
         .reduce((sum, akun) => sum + (akun.saldo_saat_ini || 0), 0);
       
@@ -163,8 +168,8 @@ const KeuanganV3: React.FC = () => {
       
       if (error) throw error;
       
-      // Filter out transactions from tabungan module (client-side filtering as backup using shared utility)
-      let filteredTransactions = excludeTabunganTransactions(transactions);
+      // Filter out transactions from tabungan and koperasi modules (client-side filtering as backup using shared utility)
+      let filteredTransactions = excludeKoperasiTransactions(excludeTabunganTransactions(transactions));
       
       // IMPORTANT: For auto-posted transactions, ensure they're always 'posted' status
       // If somehow they're not 'posted', update them (but this should rarely happen)
@@ -480,7 +485,7 @@ const KeuanganV3: React.FC = () => {
       
       setStatistics(stats);
       setRecentTransactions(transformedTransactions);
-      setAkunKas(accounts);
+      setAkunKas(filteredAccounts); // Use filtered accounts (excluding tabungan and koperasi)
       
       // Load chart data after main data is loaded (non-blocking untuk mempercepat initial render)
       // Use setTimeout to defer chart loading and improve perceived performance

@@ -1,0 +1,37 @@
+fix(koperasi): add owner_type and profit sharing columns to products
+
+## Problem
+- KasirPage crashed with "Product owner_type is required" error
+- Database missing owner_type and bagi_hasil_yayasan columns
+- Type definitions didn't match database schema
+
+## Solution
+
+### Database Migration
+- Added owner_type column to kop_barang table (default: 'koperasi')
+- Added bagi_hasil_yayasan column to kop_barang table (default: 0)
+- Created trigger to auto-set bagi_hasil_yayasan based on owner_type
+- Updated koperasi_produk view to include new columns
+- Migrated existing data:
+  * Products with inventaris_id → yayasan (70% profit sharing)
+  * Products without inventaris_id → koperasi (0% profit sharing)
+
+### Code Changes
+- KasirPage.tsx: Added defensive programming with default values
+- koperasi.service.ts: Improved validation and error handling
+- Both files now handle missing owner_type gracefully
+
+## Testing
+- [x] Database migration successful
+- [x] Columns verified in database
+- [ ] UI testing pending
+- [ ] Profit sharing calculation verification pending
+
+## Files Changed
+- src/modules/koperasi/Kasir/KasirPage.tsx
+- src/services/koperasi.service.ts
+- supabase/migrations/add_owner_type_to_kop_barang_fixed.sql
+- FIX_OWNER_TYPE_MISSING.md
+- FIX_OWNER_TYPE_SUMMARY.md
+
+Closes: Owner type missing error in Kasir page

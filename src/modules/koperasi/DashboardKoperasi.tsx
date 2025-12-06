@@ -14,21 +14,21 @@ import {
   Receipt
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { getKoperasiStats, listKoperasiProduk } from '@/services/koperasi.service';
+import { koperasiService } from '@/services/koperasi.service';
 import ModuleHeader from '@/components/ModuleHeader';
 
 const DashboardKoperasi = () => {
   const navigate = useNavigate();
 
   const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ['koperasi-stats'],
-    queryFn: () => getKoperasiStats(),
+    queryKey: ['koperasi-dashboard-stats'],
+    queryFn: () => koperasiService.getDashboardStats(),
     staleTime: 60000
   });
 
   const { data: produkData, isLoading: produkLoading } = useQuery({
     queryKey: ['koperasi-produk'],
-    queryFn: () => listKoperasiProduk({ status: 'Aktif' }),
+    queryFn: () => koperasiService.getProduk(),
     staleTime: 30000
   });
 
@@ -62,22 +62,22 @@ const DashboardKoperasi = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">
-              {statsLoading ? '...' : formatRupiah(stats?.totalOmzet || 0)}
+              {statsLoading ? '...' : formatRupiah(stats?.penjualan_hari_ini || 0)}
             </div>
-            <p className="text-xs text-muted-foreground">Total penjualan bulan ini</p>
+            <p className="text-xs text-muted-foreground">Penjualan hari ini</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Keuntungan</CardTitle>
+            <CardTitle className="text-sm font-medium">Kas Koperasi</CardTitle>
             <DollarSign className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">
-              {statsLoading ? '...' : formatRupiah(stats?.totalKeuntungan || 0)}
+              {statsLoading ? '...' : formatRupiah(stats?.kas_koperasi || 0)}
             </div>
-            <p className="text-xs text-muted-foreground">Untuk perhitungan SHU</p>
+            <p className="text-xs text-muted-foreground">Saldo saat ini</p>
           </CardContent>
         </Card>
 
@@ -88,9 +88,9 @@ const DashboardKoperasi = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-purple-600">
-              {statsLoading ? '...' : stats?.totalTransaksi || 0}
+              {statsLoading ? '...' : stats?.total_transaksi_hari_ini || 0}
             </div>
-            <p className="text-xs text-muted-foreground">Penjualan bulan ini</p>
+            <p className="text-xs text-muted-foreground">Transaksi hari ini</p>
           </CardContent>
         </Card>
 
@@ -101,7 +101,7 @@ const DashboardKoperasi = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
-              {produkLoading ? '...' : stats?.totalProduk || 0}
+              {statsLoading ? '...' : stats?.produk_aktif || 0}
             </div>
             <p className="text-xs text-muted-foreground">Produk tersedia</p>
           </CardContent>
@@ -163,6 +163,14 @@ const DashboardKoperasi = () => {
               <Store className="h-6 w-6" />
               <span>Transfer dari Inventaris</span>
             </Button>
+            <Button
+              variant="outline"
+              className="h-24 flex flex-col items-center justify-center gap-2"
+              onClick={() => navigate('/koperasi/keuangan')}
+            >
+              <DollarSign className="h-6 w-6" />
+              <span>Keuangan Koperasi</span>
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -176,9 +184,9 @@ const DashboardKoperasi = () => {
           <CardContent>
             <div className="space-y-2">
               {produkData
-                .filter(p => p.stok <= (p.stok_minimum || 0))
+                .filter((p: any) => (p.stok || 0) <= (p.stok_minimum || 0))
                 .slice(0, 5)
-                .map((produk) => (
+                .map((produk: any) => (
                   <div
                     key={produk.id}
                     className="flex items-center justify-between p-3 rounded-lg border border-yellow-200 bg-yellow-50"
@@ -186,7 +194,7 @@ const DashboardKoperasi = () => {
                     <div>
                       <p className="font-medium">{produk.nama_produk}</p>
                       <p className="text-sm text-muted-foreground">
-                        Stok: {produk.stok} {produk.satuan || 'pcs'} | Min: {produk.stok_minimum || 0}
+                        Stok: {produk.stok || 0} {produk.satuan || 'pcs'} | Min: {produk.stok_minimum || 0}
                       </p>
                     </div>
                     <Button
@@ -198,7 +206,7 @@ const DashboardKoperasi = () => {
                     </Button>
                   </div>
                 ))}
-              {produkData.filter(p => p.stok <= (p.stok_minimum || 0)).length === 0 && (
+              {produkData.filter((p: any) => (p.stok || 0) <= (p.stok_minimum || 0)).length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   Semua produk memiliki stok cukup
                 </p>

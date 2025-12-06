@@ -13,6 +13,7 @@ export interface AkunKas {
   tanggal_buka: string;
   status: 'aktif' | 'ditutup' | 'suspended';
   is_default: boolean;
+  managed_by?: string | null;
   created_at: string;
   updated_at: string;
 }

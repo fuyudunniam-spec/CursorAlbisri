@@ -1,18 +1,19 @@
 import { supabase } from "@/integrations/supabase/client";
 import { addKeuanganTransaction } from "@/services/keuangan.service";
 import { AkunKasService } from "@/services/akunKas.service";
-import type { 
-  MultiItemSalePayload, 
-  MultiItemSaleDetail, 
-  PenjualanHeader, 
-  PenjualanItem 
+import type {
+  MultiItemSalePayload,
+  MultiItemSaleDetail,
+  PenjualanHeader,
+  PenjualanItem,
 } from "@/types/inventaris.types";
-import { 
-  ValidationError, 
-  StockError, 
-  DatabaseError, 
-  FinancialError 
+import {
+  ValidationError,
+  StockError,
+  DatabaseError,
+  FinancialError,
 } from "@/utils/inventaris-error-handling";
+import { addKeuanganKoperasiTransaction } from "@/services/keuanganKoperasi.service";
 
 // Helper untuk mendeteksi error CORS
 function isCorsError(error: any): boolean {
@@ -53,6 +54,9 @@ export type InventoryItem = {
   min_stock?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  owner_type?: 'yayasan' | 'koperasi' | null;
+  boleh_dijual_koperasi?: boolean | null;
+  hpp_yayasan?: number | null;
 };
 
 export type InventoryTransaction = {
@@ -94,7 +98,9 @@ export async function listInventory(
   sort: Sort = { column: "created_at", direction: "desc" }
 ) {
   const { page, pageSize } = pagination;
-  let query = supabase.from("inventaris").select("*", { count: "exact" });
+  let query = supabase
+    .from("inventaris")
+    .select("*, kode_inventaris, is_komoditas, boleh_dijual_koperasi, hpp_yayasan, owner_type", { count: "exact" });
 
   console.log('listInventory called with filters:', filters);
 
@@ -130,15 +136,186 @@ export async function getInventoryItem(id: string) {
   return data as InventoryItem;
 }
 
+/**
+ * Log perubahan flag owner_type atau boleh_dijual_koperasi
+ */
+async function logFlagChange(
+  inventarisId: string,
+  fieldName: 'owner_type' | 'boleh_dijual_koperasi',
+  oldValue: any,
+  newValue: any
+) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase
+      .from('inventaris_flag_change_log')
+      .insert({
+        inventaris_id: inventarisId,
+        field_name: fieldName,
+        old_value: oldValue?.toString() || null,
+        new_value: newValue?.toString() || null,
+        changed_by: user?.id || null,
+      });
+  } catch (error) {
+    console.error('Error logging flag change:', error);
+    // Tidak throw error, hanya log
+  }
+}
+
+/**
+ * Auto-sync inventaris item ke kop_barang ketika boleh_dijual_koperasi = true
+ */
+async function syncToKopBarang(inventarisItem: any) {
+  // Hanya sync jika boleh_dijual_koperasi = true dan tipe_item = 'Komoditas'
+  if (!inventarisItem.boleh_dijual_koperasi || inventarisItem.tipe_item !== 'Komoditas') {
+    // Jika tidak boleh dijual, set is_active = false di kop_barang jika ada
+    const { data: existing } = await supabase
+      .from('kop_barang')
+      .select('id')
+      .eq('inventaris_id', inventarisItem.id)
+      .maybeSingle();
+    
+    if (existing) {
+      await supabase
+        .from('kop_barang')
+        .update({ is_active: false })
+        .eq('id', existing.id);
+    }
+    return;
+  }
+
+  // Generate kode produk
+  const ownerType = inventarisItem.owner_type || 'yayasan';
+  const prefix = ownerType === 'yayasan' ? 'YYS' : 'KOP';
+  
+  // Get last kode
+  const { data: lastKode } = await supabase
+    .from('kop_barang')
+    .select('kode_barang')
+    .like('kode_barang', `${prefix}-%`)
+    .order('kode_barang', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let kodeProduk = `${prefix}-0001`;
+  if (lastKode?.kode_barang) {
+    const match = lastKode.kode_barang.match(/\d+$/);
+    if (match) {
+      const num = parseInt(match[0]) + 1;
+      kodeProduk = `${prefix}-${String(num).padStart(4, '0')}`;
+    }
+  }
+
+  // Check if kop_barang already exists
+  const { data: existing } = await supabase
+    .from('kop_barang')
+    .select('id')
+    .eq('inventaris_id', inventarisItem.id)
+    .maybeSingle();
+
+  const hppYayasan = inventarisItem.hpp_yayasan || inventarisItem.harga_perolehan || 0;
+
+  if (existing) {
+    // Update existing
+    await supabase
+      .from('kop_barang')
+      .update({
+        nama_barang: inventarisItem.nama_barang,
+        satuan_dasar: inventarisItem.satuan || 'pcs',
+        harga_beli: hppYayasan,
+        harga_transfer: hppYayasan,
+        owner_type: ownerType,
+        is_active: true,
+        // Harga jual tetap, tidak di-overwrite
+      })
+      .eq('id', existing.id);
+  } else {
+    // Create new
+    // Get default sumber_modal_id (first one)
+    const { data: sumberModal } = await supabase
+      .from('kop_sumber_modal')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    await supabase
+      .from('kop_barang')
+      .insert({
+        kode_barang: kodeProduk,
+        nama_barang: inventarisItem.nama_barang,
+        satuan_dasar: inventarisItem.satuan || 'pcs',
+        harga_beli: hppYayasan,
+        harga_jual_ecer: hppYayasan * 1.2, // Default markup 20%
+        harga_jual_grosir: hppYayasan * 1.15, // Default markup 15%
+        inventaris_id: inventarisItem.id,
+        harga_transfer: hppYayasan,
+        owner_type: ownerType,
+        sumber_modal_id: sumberModal?.id || null,
+        is_active: true,
+        stok: 0, // Stok tetap di inventaris, kop_barang hanya untuk jual
+      });
+  }
+}
+
 export async function createInventoryItem(payload: Partial<InventoryItem>) {
   const { data, error } = await supabase.from("inventaris").insert(payload).select("*").single();
   if (error) throw error;
+  
+  // Log flag changes jika ada
+  if ('owner_type' in payload) {
+    await logFlagChange(data.id, 'owner_type', null, payload.owner_type);
+  }
+  if ('boleh_dijual_koperasi' in payload) {
+    await logFlagChange(data.id, 'boleh_dijual_koperasi', null, payload.boleh_dijual_koperasi);
+  }
+  
+  // Auto-sync ke kop_barang jika boleh_dijual_koperasi = true
+  if (data.boleh_dijual_koperasi && data.tipe_item === 'Komoditas') {
+    try {
+      await syncToKopBarang(data);
+    } catch (syncError) {
+      console.error('Error syncing to kop_barang:', syncError);
+      // Tidak throw error, hanya log
+    }
+  }
+  
   return data as InventoryItem;
 }
 
 export async function updateInventoryItem(id: string, payload: Partial<InventoryItem>) {
+  // Get old data untuk cek perubahan boleh_dijual_koperasi
+  const { data: oldData } = await supabase
+    .from('inventaris')
+    .select('boleh_dijual_koperasi, tipe_item, owner_type')
+    .eq('id', id)
+    .single();
+
   const { data, error } = await supabase.from("inventaris").update(payload).eq("id", id).select("*").single();
   if (error) throw error;
+  
+  // Log flag changes jika ada perubahan
+  if ('owner_type' in payload && payload.owner_type !== oldData?.owner_type) {
+    await logFlagChange(id, 'owner_type', oldData?.owner_type, payload.owner_type);
+  }
+  if ('boleh_dijual_koperasi' in payload && payload.boleh_dijual_koperasi !== oldData?.boleh_dijual_koperasi) {
+    await logFlagChange(id, 'boleh_dijual_koperasi', oldData?.boleh_dijual_koperasi, payload.boleh_dijual_koperasi);
+  }
+  
+  // Auto-sync ke kop_barang jika boleh_dijual_koperasi berubah atau owner_type berubah
+  const shouldSync = 
+    ('boleh_dijual_koperasi' in payload && payload.boleh_dijual_koperasi !== oldData?.boleh_dijual_koperasi) ||
+    ('owner_type' in payload && payload.owner_type !== oldData?.owner_type) ||
+    (data.boleh_dijual_koperasi && data.tipe_item === 'Komoditas');
+  
+  if (shouldSync) {
+    try {
+      await syncToKopBarang(data);
+    } catch (syncError) {
+      console.error('Error syncing to kop_barang:', syncError);
+      // Tidak throw error, hanya log
+    }
+  }
+  
   return data as InventoryItem;
 }
 
@@ -151,8 +328,11 @@ export type TransactionFilters = {
   search?: string | null; // by nama_barang
   tipe?: "Masuk" | "Keluar" | "Stocktake" | "all" | null;
   keluar_mode?: string | null; // Filter untuk mode keluar (Penjualan, Distribusi, dll)
+  channel?: 'koperasi' | 'dapur' | 'distribusi_bantuan' | 'all' | null;
   startDate?: string | null;
   endDate?: string | null;
+  item_id?: string | null;
+  penerima?: string | null;
 };
 
 export async function listTransactions(
@@ -180,6 +360,7 @@ export async function listTransactions(
 
   if (filters.tipe && filters.tipe !== "all") query = query.eq("tipe", filters.tipe);
   if (filters.keluar_mode && filters.keluar_mode !== "all") query = query.eq("keluar_mode", filters.keluar_mode);
+  if (filters.channel && filters.channel !== "all") query = query.eq("channel", filters.channel);
   if (filters.startDate) query = query.gte("tanggal", filters.startDate);
   if (filters.endDate) query = query.lte("tanggal", filters.endDate);
 
@@ -1452,11 +1633,11 @@ export async function createMultiItemSale(
       throw new DatabaseError('Header transaksi tidak dikembalikan setelah insert');
     }
     
-    // Fetch item names for the items
+    // Fetch item names and satuan for the items
     const itemIds = payload.items.map(item => item.item_id);
     const { data: inventoryItems, error: inventoryError } = await supabase
       .from('inventaris')
-      .select('id, nama_barang')
+      .select('id, nama_barang, satuan')
       .in('id', itemIds);
     
     if (inventoryError) {
@@ -1469,19 +1650,23 @@ export async function createMultiItemSale(
     }
     
     const inventoryMap = new Map(
-      (inventoryItems || []).map(item => [item.id, item.nama_barang])
+      (inventoryItems || []).map(item => [item.id, { nama_barang: item.nama_barang, satuan: item.satuan }])
     );
     
     // Step 3: Prepare items for batch insert
-    const itemsToInsert = payload.items.map(item => ({
-      penjualan_header_id: header.id,
-      item_id: item.item_id,
-      nama_barang: inventoryMap.get(item.item_id) || 'Item tidak ditemukan',
-      jumlah: item.jumlah,
-      harga_dasar: item.harga_dasar,
-      sumbangan: item.sumbangan,
-      subtotal: calculateSubtotal(item.jumlah, item.harga_dasar, item.sumbangan)
-    }));
+    const itemsToInsert = payload.items.map(item => {
+      const inventoryData = inventoryMap.get(item.item_id);
+      return {
+        penjualan_header_id: header.id,
+        item_id: item.item_id,
+        nama_barang: inventoryData?.nama_barang || 'Item tidak ditemukan',
+        satuan: inventoryData?.satuan || null,
+        jumlah: item.jumlah,
+        harga_dasar: item.harga_dasar,
+        sumbangan: item.sumbangan,
+        subtotal: calculateSubtotal(item.jumlah, item.harga_dasar, item.sumbangan)
+      };
+    });
     
     // Batch insert items
     const { data: insertedItems, error: itemsError } = await supabase
@@ -1584,13 +1769,26 @@ export async function createMultiItemSale(
     
     if (totals.grand_total > 0) {
       try {
-        // Get default akun kas
+        // FIXED: Get Kas Koperasi instead of default akun kas
+        // Penjualan inventaris harus masuk ke Kas Koperasi
         let targetAkunKasId: string | undefined;
         try {
-          const defaultAkun = await AkunKasService.getDefault();
-          targetAkunKasId = defaultAkun?.id;
+          const { data: kasKoperasi } = await supabase
+            .from('akun_kas')
+            .select('id')
+            .eq('managed_by', 'koperasi')
+            .eq('status', 'aktif')
+            .single();
+          
+          if (kasKoperasi) {
+            targetAkunKasId = kasKoperasi.id;
+          } else {
+            console.warn('Kas Koperasi tidak ditemukan, menggunakan akun kas default');
+            const defaultAkun = await AkunKasService.getDefault();
+            targetAkunKasId = defaultAkun?.id;
+          }
         } catch (e) {
-          console.warn('Gagal mengambil akun kas default, lanjut tanpa akun_kas_id');
+          console.warn('Gagal mengambil akun kas koperasi, lanjut tanpa akun_kas_id');
         }
         
         // Build concise description with item names and quantities
@@ -1611,20 +1809,24 @@ export async function createMultiItemSale(
           description = `${itemDescriptions} / ${payload.pembeli}`;
         }
         
-        const keuanganResult = await addKeuanganTransaction({
-          jenis_transaksi: 'Pemasukan',
-          kategori: 'Penjualan Inventaris',
+        // FIXED: Post to keuangan_koperasi instead of keuangan, via koperasi service
+        const keuanganResult = await addKeuanganKoperasiTransaction({
+          jenis_transaksi: "Pemasukan",
+          kategori: "Penjualan Inventaris",
           jumlah: totals.grand_total,
           tanggal: payload.tanggal,
           deskripsi: description,
           referensi: `multi_item_sale:${header.id}`,
           akun_kas_id: targetAkunKasId,
-          status: 'posted'
-        });
-        
-        const createdKeuangan = Array.isArray(keuanganResult) 
-          ? keuanganResult[0] 
-          : (keuanganResult?.[0] || keuanganResult);
+          // Informasi tambahan untuk laporan laba rugi koperasi
+          hpp: totals.total_harga_dasar,
+          laba_kotor: totals.total_sumbangan,
+          tipe_akun: "Pendapatan",
+        } as any);
+
+        const createdKeuangan = Array.isArray(keuanganResult)
+          ? keuanganResult[0]
+          : keuanganResult?.[0] || keuanganResult;
         
         if (createdKeuangan?.id) {
           keuanganId = createdKeuangan.id;
@@ -1714,7 +1916,10 @@ export async function getMultiItemSale(
       .from('penjualan_header')
       .select(`
         *,
-        items:penjualan_items(*)
+        items:penjualan_items(
+          *,
+          inventaris!inner(nama_barang)
+        )
       `)
       .eq('id', headerId)
       .single();
@@ -1728,6 +1933,14 @@ export async function getMultiItemSale(
         'Gagal mengambil detail transaksi multi-item',
         { originalError: error }
       );
+    }
+    
+    // Transform items to include nama_barang at root level
+    if (data && data.items) {
+      data.items = data.items.map((item: any) => ({
+        ...item,
+        nama_barang: item.inventaris?.nama_barang || 'Item tidak ditemukan'
+      }));
     }
     
     return data as MultiItemSaleDetail;
@@ -1756,12 +1969,15 @@ export async function listMultiItemSales(
   try {
     const { page, pageSize } = pagination;
     
-    // Build base query
+    // Build base query with inventaris join to get nama_barang
     let query = supabase
       .from('penjualan_header')
       .select(`
         *,
-        items:penjualan_items(*)
+        items:penjualan_items(
+          *,
+          inventaris!inner(nama_barang)
+        )
       `, { count: 'exact' });
     
     // Apply filters
@@ -1854,18 +2070,30 @@ export async function getCombinedSalesHistory(
   total: number;
 }> {
   try {
-    // Fetch single-item transactions (exclude items that are part of multi-item sales)
-    // First, get all transaksi_inventaris IDs that are linked to penjualan_items
-    const { data: linkedTransaksiIds } = await supabase
+    // Fetch multi-item transactions first
+    const multiResult = await listMultiItemSales(
+      pagination,
+      filters
+    );
+    
+    // Get all transaksi_inventaris IDs that are part of multi-item sales
+    // These should NOT be displayed as separate single-item transactions
+    const { data: linkedTransaksiIds, error: linkedError } = await supabase
       .from('penjualan_items')
       .select('transaksi_inventaris_id')
       .not('transaksi_inventaris_id', 'is', null);
     
+    if (linkedError) {
+      console.error('Error fetching linked transaction IDs:', linkedError);
+    }
+    
     const excludeIds = (linkedTransaksiIds || [])
       .map(item => item.transaksi_inventaris_id)
-      .filter(id => id !== null);
+      .filter(id => id !== null) as string[];
     
-    // Now fetch single-item transactions, excluding those IDs
+    console.log('[DEBUG] Excluding transaction IDs from single-item list:', excludeIds);
+    
+    // Now fetch single-item transactions, excluding those that are part of multi-item sales
     let query = supabase
       .from('transaksi_inventaris')
       .select(`
@@ -1874,39 +2102,44 @@ export async function getCombinedSalesHistory(
       `)
       .eq('tipe', 'Keluar')
       .eq('keluar_mode', 'Penjualan')
-      .order('tanggal', { ascending: false })
-      .range(0, pagination.pageSize - 1);
+      .order('tanggal', { ascending: false });
     
-    // Exclude IDs that are part of multi-item sales
-    if (excludeIds.length > 0) {
-      query = query.not('id', 'in', `(${excludeIds.join(',')})`);
+    // Apply filters
+    if (filters.startDate) {
+      query = query.gte('tanggal', filters.startDate);
+    }
+    if (filters.endDate) {
+      query = query.lte('tanggal', filters.endDate);
     }
     
-    const { data: singleTransactions, error: singleError } = await query;
+    // Fetch all matching transactions
+    const { data: allTransactions, error: singleError } = await query;
     
     if (singleError) {
       console.error('Error fetching single transactions:', singleError);
       throw new DatabaseError('Gagal mengambil transaksi single-item', { originalError: singleError });
     }
     
+    // Filter out transactions that are part of multi-item sales (client-side filtering for reliability)
+    const singleTransactions = (allTransactions || []).filter(trx => 
+      !excludeIds.includes(trx.id)
+    );
+    
+    console.log('[DEBUG] Total transactions fetched:', allTransactions?.length);
+    console.log('[DEBUG] Single-item transactions after filtering:', singleTransactions.length);
+    
     const singleResult = {
-      data: (singleTransactions || []).map(trx => ({
+      data: singleTransactions.map(trx => ({
         ...trx,
         nama_barang: trx.inventaris?.nama_barang || 'Item tidak ditemukan',
         kategori: trx.inventaris?.kategori || '',
         satuan: trx.inventaris?.satuan || ''
       })) as InventoryTransaction[],
-      total: singleTransactions?.length || 0
+      total: singleTransactions.length
     };
     
-    // Fetch multi-item transactions
-    const multiResult = await listMultiItemSales(
-      pagination,
-      filters
-    );
-    
     // Transform single-item transactions
-    const singleItems = singleResult.data.map(trx => ({
+    const singleItems = singleResult.data.map((trx: any) => ({
       id: trx.id,
       type: 'single' as const,
       pembeli: trx.penerima || 'Unknown',
@@ -1934,9 +2167,21 @@ export async function getCombinedSalesHistory(
       return new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime();
     });
     
+    // Apply pagination to combined results
+    const startIndex = (pagination.page - 1) * pagination.pageSize;
+    const endIndex = startIndex + pagination.pageSize;
+    const paginatedData = combined.slice(startIndex, endIndex);
+    
+    console.log('[DEBUG] Combined results:', {
+      singleItems: singleItems.length,
+      multiItems: multiItems.length,
+      total: combined.length,
+      paginated: paginatedData.length
+    });
+    
     return {
-      data: combined,
-      total: singleResult.total + multiResult.total
+      data: paginatedData,
+      total: combined.length
     };
   } catch (error: any) {
     console.error('Error in getCombinedSalesHistory:', error);

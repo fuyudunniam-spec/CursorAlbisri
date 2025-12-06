@@ -24,9 +24,16 @@ interface SummaryCardsProps {
     pengeluaranTrend: number;
   };
   selectedAccountName?: string;
+  periodLabel?: string; // Label untuk periode yang dipilih (e.g., "Bulan Ini", "Bulan Lalu", "3 Bulan Terakhir")
+  previousPeriodLabel?: string; // Label untuk periode sebelumnya (untuk trend)
 }
 
-const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, selectedAccountName }) => {
+const SummaryCards: React.FC<SummaryCardsProps> = ({ 
+  stats, 
+  selectedAccountName,
+  periodLabel = 'Bulan Ini',
+  previousPeriodLabel = 'periode sebelumnya'
+}) => {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
@@ -37,11 +44,11 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, selectedAccountName 
   };
 
   const formatTrend = (trend: number) => {
-    if (trend === 0) return 'Tidak ada data bulan lalu';
+    if (trend === 0) return `Tidak ada data ${previousPeriodLabel}`;
     // Round to 2 decimal places untuk menghindari angka terlalu panjang
     const roundedTrend = Math.round(trend * 100) / 100;
     const sign = roundedTrend >= 0 ? '+' : '';
-    return `${sign}${roundedTrend.toFixed(2)}% dari bulan lalu`;
+    return `${sign}${roundedTrend.toFixed(2)}% dari ${previousPeriodLabel}`;
   };
 
   const cards: StatCard[] = [
@@ -56,7 +63,7 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, selectedAccountName 
       color: 'text-blue-600',
     },
     {
-      title: 'Pemasukan Bulan Ini',
+      title: `Pemasukan ${periodLabel}`,
       value: formatCurrency(stats.pemasukanBulanIni),
       trend: {
         value: formatTrend(stats.pemasukanTrend),
@@ -66,7 +73,7 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, selectedAccountName 
       color: 'text-green-600',
     },
     {
-      title: 'Pengeluaran Bulan Ini',
+      title: `Pengeluaran ${periodLabel}`,
       value: formatCurrency(stats.pengeluaranBulanIni),
       trend: {
         value: formatTrend(stats.pengeluaranTrend),
@@ -76,7 +83,7 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, selectedAccountName 
       color: 'text-red-600',
     },
     {
-      title: 'Transaksi Bulan Ini',
+      title: `Transaksi ${periodLabel}`,
       value: stats.totalTransaksi.toString(),
       trend: {
         value: '3 pending',

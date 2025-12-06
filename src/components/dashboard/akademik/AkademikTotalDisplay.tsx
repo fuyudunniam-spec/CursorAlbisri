@@ -95,3 +95,7 @@ const AkademikTotalDisplay: React.FC<AkademikTotalDisplayProps> = ({
 
 export default AkademikTotalDisplay;
 
+
+
+
+

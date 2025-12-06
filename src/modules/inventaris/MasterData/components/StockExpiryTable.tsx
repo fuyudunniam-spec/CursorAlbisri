@@ -331,3 +331,6 @@ const StockExpiryTable: React.FC<StockExpiryTableProps> = ({
 
 export default StockExpiryTable;
 
+
+
+

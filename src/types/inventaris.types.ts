@@ -15,6 +15,12 @@ export type InventoryItem = {
   min_stock?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  // Kode inventaris & integrasi koperasi
+  kode_inventaris?: string | null;
+  is_komoditas?: boolean | null;
+  boleh_dijual_koperasi?: boolean | null;
+  hpp_yayasan?: number | null;
+  owner_type?: 'yayasan' | 'koperasi' | null;
 };
 
 export type InventoryTransaction = {
@@ -27,6 +33,7 @@ export type InventoryTransaction = {
   harga_dasar?: number | null;
   sumbangan?: number | null;
   total_nilai?: number | null;
+  harga_total?: number | null;
   before_qty?: number | null;
   after_qty?: number | null;
   penerima?: string | null;
@@ -35,6 +42,8 @@ export type InventoryTransaction = {
   catatan?: string | null;
   keuangan_id?: string | null;
   created_at?: string | null;
+  // Channel tracking untuk keluar-masuk inventaris
+  channel?: 'koperasi' | 'dapur' | 'distribusi_bantuan' | null;
   // Legacy fields for compatibility
   mutation_id?: string | null;
   kategori_barang?: string | null;
@@ -60,6 +69,7 @@ export type TransactionFilters = {
   search?: string | null; // by nama_barang
   tipe?: "Masuk" | "Keluar" | "Stocktake" | "all" | null;
   keluar_mode?: "Penjualan" | "Distribusi" | "all" | null;
+  channel?: 'koperasi' | 'dapur' | 'distribusi_bantuan' | 'all' | null;
   startDate?: string | null;
   endDate?: string | null;
   item_id?: string | null;
@@ -141,6 +151,7 @@ export type PenjualanItem = {
   penjualan_header_id?: string;
   item_id: string;
   nama_barang: string;
+  satuan?: string | null;
   jumlah: number;
   harga_dasar: number;
   sumbangan: number;

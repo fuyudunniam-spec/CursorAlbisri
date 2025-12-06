@@ -31,7 +31,9 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
     sumber: editItem?.sumber || null,
     has_expiry: editItem?.has_expiry || false,
     tanggal_kedaluwarsa: editItem?.tanggal_kedaluwarsa || '',
-    min_stock: editItem?.min_stock || ''
+    min_stock: editItem?.min_stock || '',
+    owner_type: editItem?.owner_type || 'yayasan',
+    boleh_dijual_koperasi: editItem?.boleh_dijual_koperasi || false
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,6 +67,9 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
       queryClient.invalidateQueries({ queryKey: ['inventory-master'] });
       queryClient.invalidateQueries({ queryKey: ['low-stock'] });
       queryClient.invalidateQueries({ queryKey: ['near-expiry'] });
+      queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
+      queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['koperasi-yayasan-items'] });
       
       toast.success(editItem ? 'Item berhasil diperbarui' : 'Item berhasil ditambahkan');
       onClose();
@@ -251,6 +256,22 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
                   placeholder="0"
                 />
               </div>
+
+              <div>
+                <Label htmlFor="owner_type">Sumber / Owner *</Label>
+                <Select
+                  value={formData.owner_type}
+                  onValueChange={(value) => setFormData({ ...formData, owner_type: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih sumber barang" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yayasan">Yayasan</SelectItem>
+                    <SelectItem value="koperasi">Koperasi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Expiry Section */}
@@ -259,7 +280,7 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
                 <Switch
                   id="has_expiry"
                   checked={formData.has_expiry}
-                  onCheckedChange={(checked) => setFormData({...formData, has_expiry: checked})}
+                  onCheckedChange={(checked) => setFormData({ ...formData, has_expiry: checked })}
                 />
                 <Label htmlFor="has_expiry">Barang memiliki tanggal kedaluwarsa</Label>
               </div>
@@ -271,16 +292,42 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
                     id="tanggal_kedaluwarsa"
                     type="date"
                     value={formData.tanggal_kedaluwarsa}
-                    onChange={(e) => setFormData({...formData, tanggal_kedaluwarsa: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tanggal_kedaluwarsa: e.target.value })
+                    }
                   />
                 </div>
               )}
             </div>
 
+            {/* Koperasi Section */}
+            {formData.tipe_item === 'Komoditas' && (
+              <div className="space-y-4 border-t pt-4">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="boleh_dijual_koperasi"
+                    checked={formData.boleh_dijual_koperasi}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, boleh_dijual_koperasi: checked })
+                    }
+                  />
+                  <Label htmlFor="boleh_dijual_koperasi">Boleh Dijual di Koperasi</Label>
+                </div>
+                {formData.boleh_dijual_koperasi && (
+                  <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-800">
+                    <p>
+                      Item ini akan muncul di kasir koperasi. Pastikan harga jual sudah diatur di
+                      Master Produk Koperasi.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-2 pt-4">
               <Button type="submit" disabled={isSubmitting} className="flex items-center gap-2">
                 <Save className="h-4 w-4" />
-                {isSubmitting ? 'Menyimpan...' : (editItem ? 'Update' : 'Simpan')}
+                {isSubmitting ? 'Menyimpan...' : editItem ? 'Update' : 'Simpan'}
               </Button>
               <Button type="button" variant="outline" onClick={onClose}>
                 Batal

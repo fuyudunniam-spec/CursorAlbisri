@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -43,11 +43,13 @@ const DashboardKeuangan = lazy(() => import('./modules/keuangan/DashboardKeuanga
 const DashboardAkademik = lazy(() => import('./modules/akademik/DashboardAkademik'));
 const MasterKelasPage = lazy(() => import('./modules/akademik/MasterKelasPage'));
 const PloatingKelasSimple = lazy(() => import('./modules/akademik/PloatingKelasSimple'));
+const KelasPage = lazy(() => import('./modules/akademik/KelasPage'));
 const SemesterManagementPage = lazy(() => import('./modules/akademik/SemesterManagementPage'));
 const PresensiKelasPage = lazy(() => import('./modules/akademik/PresensiKelasPage'));
 const SetoranHarianPage = lazy(() => import('./modules/akademik/SetoranHarianPage'));
 const PerizinanSantriPage = lazy(() => import('./modules/akademik/PerizinanSantriPage'));
 const JurnalPertemuanPage = lazy(() => import('./modules/akademik/JurnalPertemuanPage'));
+const PertemuanPage = lazy(() => import('./modules/akademik/PertemuanPage'));
 const DashboardPengajar = lazy(() => import('./modules/akademik/DashboardPengajar'));
 const ProfilPengajarPage = lazy(() => import('./modules/akademik/ProfilPengajarPage'));
 const DashboardAdmin = lazy(() => import('./modules/admin/DashboardAdmin'));
@@ -60,9 +62,27 @@ const PenjualanPage = lazy(() => import('./modules/inventaris/Sales/PenjualanPag
 const DistribusiPage = lazy(() => import('./modules/inventaris/Distribution/DistribusiPage'));
 const DistribusiPaketPage = lazy(() => import('./modules/inventaris/Distribution/DistribusiPaketPage'));
 const MasterPaketPage = lazy(() => import('./modules/inventaris/Distribution/MasterPaketPage'));
+const RiwayatInventarisYayasanPage = lazy(() => import('./modules/inventaris/Transactions/RiwayatInventarisYayasanPage'));
 const KeuanganAuditPage = lazy(() => import('./pages/admin/KeuanganAuditPage'));
 const KeuanganV3 = lazy(() => import('./pages/KeuanganV3'));
 const InventarisDashboard = lazy(() => import('./pages/InventarisDashboard'));
+
+// Lazy imports for koperasi modules
+const DashboardKoperasi = lazy(() => import('./modules/koperasi/Dashboard/DashboardKoperasi'));
+const MasterProdukPage = lazy(() => import('./modules/koperasi/MasterData/MasterProdukPage'));
+const SupplierPage = lazy(() => import('./modules/koperasi/MasterData/SupplierPage'));
+const KasirPage = lazy(() => import('./modules/koperasi/Kasir/KasirPage'));
+const StockKoperasiPage = lazy(() => import('./modules/koperasi/Inventaris/StockKoperasiPage'));
+const TransferInventarisPage = lazy(() => import('./modules/koperasi/Transfer/TransferInventarisPage'));
+const RiwayatPenjualanPage = lazy(() => import('./modules/koperasi/Penjualan/RiwayatPenjualanPage'));
+const KeuanganKoperasiPage = lazy(() => import('./modules/koperasi/Keuangan/KeuanganUnifiedPage'));
+const KeuanganDashboardKoperasi = lazy(() => import('./modules/koperasi/Keuangan/KeuanganDashboard'));
+// Using KeuanganUnifiedPage for all keuangan routes (replaces separate pages)
+const KeuanganPembelianPage = lazy(() => import('./modules/koperasi/Keuangan/KeuanganUnifiedPage'));
+const KeuanganOperasionalPage = lazy(() => import('./modules/koperasi/Keuangan/KeuanganUnifiedPage'));
+// BagiHasilPage merged into KelolaHPPDanBagiHasilPage
+const KelolaHPPDanBagiHasilPage = lazy(() => import('./modules/koperasi/Keuangan/KelolaHPPDanBagiHasilPage'));
+const LaporanKoperasiPage = lazy(() => import('./modules/koperasi/Laporan/LaporanPage'));
 // Force rebuild for lazy load fix
 
 const queryClient = new QueryClient();
@@ -118,12 +138,9 @@ const App = () => (
                 </Suspense>
               </Layout>
             } />
+            {/* Sales removed from yayasan inventory - all sales now through koperasi */}
             <Route path="/inventaris/sales" element={
-              <Layout>
-                <Suspense fallback={<div>Loading...</div>}>
-                  <PenjualanPage />
-                </Suspense>
-              </Layout>
+              <Navigate to="/koperasi/kasir" replace />
             } />
             <Route path="/inventaris/distribution" element={
               <Layout>
@@ -143,6 +160,105 @@ const App = () => (
               <Layout>
                 <Suspense fallback={<div>Loading...</div>}>
                   <MasterPaketPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/inventaris/riwayat" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <RiwayatInventarisYayasanPage />
+                </Suspense>
+              </Layout>
+            } />
+            {/* Koperasi Module Routes */}
+            <Route path="/koperasi" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <DashboardKoperasi />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/master" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <MasterProdukPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/master/supplier" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <SupplierPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/kasir" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KasirPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/inventaris" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <StockKoperasiPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/transfer" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <TransferInventarisPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/penjualan" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <RiwayatPenjualanPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/keuangan/dashboard" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KeuanganDashboardKoperasi />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/keuangan" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KeuanganKoperasiPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/keuangan/pembelian" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KeuanganPembelianPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/keuangan/operasional" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KeuanganOperasionalPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/keuangan/kelola-hpp" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KelolaHPPDanBagiHasilPage />
+                </Suspense>
+              </Layout>
+            } />
+            <Route path="/koperasi/laporan" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <LaporanKoperasiPage />
                 </Suspense>
               </Layout>
             } />
@@ -170,17 +286,18 @@ const App = () => (
                 </Suspense>
               </Layout>
             } />
-            <Route path="/akademik/master" element={
-              <Layout>
-                <Suspense fallback={<div>Loading...</div>}>
-                  <MasterKelasPage />
-                </Suspense>
-              </Layout>
-            } />
             <Route path="/akademik/kelas" element={
               <Layout>
                 <Suspense fallback={<div>Loading...</div>}>
-                  <PloatingKelasSimple />
+                  <KelasPage />
+                </Suspense>
+              </Layout>
+            } />
+            {/* Backward compatibility - redirect old routes */}
+            <Route path="/akademik/master" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KelasPage />
                 </Suspense>
               </Layout>
             } />
@@ -194,7 +311,7 @@ const App = () => (
             <Route path="/akademik/presensi" element={
               <Layout>
                 <Suspense fallback={<div>Loading...</div>}>
-                  <PresensiKelasPage />
+                  <PertemuanPage />
                 </Suspense>
               </Layout>
             } />
@@ -205,10 +322,18 @@ const App = () => (
                 </Suspense>
               </Layout>
             } />
+            <Route path="/akademik/pertemuan" element={
+              <Layout>
+                <Suspense fallback={<div>Loading...</div>}>
+                  <PertemuanPage />
+                </Suspense>
+              </Layout>
+            } />
+            {/* Backward compatibility - redirect old routes */}
             <Route path="/akademik/jurnal" element={
               <Layout>
                 <Suspense fallback={<div>Loading...</div>}>
-                  <JurnalPertemuanPage />
+                  <PertemuanPage />
                 </Suspense>
               </Layout>
             } />
@@ -307,7 +432,7 @@ const App = () => (
                 <Inventaris />
               </Layout>
             } />
-            <Route path="/koperasi" element={
+            <Route path="/koperasi-old" element={
               <Layout>
                 <Koperasi />
               </Layout>

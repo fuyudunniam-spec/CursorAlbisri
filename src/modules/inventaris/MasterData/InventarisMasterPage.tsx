@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import ModuleHeader from '@/components/ModuleHeader';
 import ItemList from './components/ItemList';
 import StockOpname from './components/StockOpname';
@@ -10,8 +12,10 @@ import { Package, ClipboardList, FileSpreadsheet, AlertTriangle } from 'lucide-r
 import { getLowStock, getNearExpiry, listInventory, deleteInventoryItem } from '@/services/inventaris.service';
 import { InventoryItem } from '@/types/inventaris.types';
 import { useToast } from '@/hooks/use-toast';
+import { useStockNotifications } from '@/hooks/useStockNotifications';
 
 const InventarisMasterPage = () => {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('items');
     const [lowStockItems, setLowStockItems] = useState<any[]>([]);
     const [expiredItems, setExpiredItems] = useState<any[]>([]);
@@ -23,6 +27,12 @@ const InventarisMasterPage = () => {
     const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const { toast } = useToast();
+
+    // Enable real-time stock notifications
+    useStockNotifications({ 
+        enabled: true, 
+        lowStockThreshold: 10 
+    });
 
     useEffect(() => {
         if (activeTab === 'items') {
@@ -114,7 +124,6 @@ const InventarisMasterPage = () => {
     const tabs = [
         { label: 'Dashboard', path: '/inventaris' },
         { label: 'Master Data', path: '/inventaris/master' },
-        { label: 'Penjualan', path: '/inventaris/sales' },
         { label: 'Distribusi', path: '/inventaris/distribution' }
     ];
 
@@ -203,6 +212,7 @@ const InventarisMasterPage = () => {
                     onConfirm={handleDeleteItem}
                 />
             )}
+
         </div>
     );
 };
