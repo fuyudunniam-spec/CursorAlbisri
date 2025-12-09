@@ -750,7 +750,7 @@ const SantriFormWizard: React.FC<SantriFormWizardProps> = ({ santriId, onClose, 
     <Dialog open={true} onOpenChange={(open) => {
       if (!open && !isLoading) onClose();
     }}>
-      <DialogContent className="max-w-7xl w-full max-h-[95vh] overflow-hidden p-0 m-4 sm:m-0">
+      <DialogContent className="max-w-7xl max-h-[95vh] overflow-hidden p-0">
         <VisuallyHidden asChild>
           <DialogTitle>{santriId ? 'Edit Data Santri' : 'Form Pendaftaran Santri'}</DialogTitle>
         </VisuallyHidden>
@@ -764,10 +764,10 @@ const SantriFormWizard: React.FC<SantriFormWizardProps> = ({ santriId, onClose, 
           </div>
         ) : (
         <div className="bg-gradient-to-br from-slate-50 to-blue-50/30">
-          <div className="flex flex-col lg:flex-row h-[90vh] max-h-[calc(100vh-2rem)]">
-            {/* Sidebar - Responsif: full width di mobile, fixed width di desktop */}
-            <aside className="w-full lg:w-80 bg-white/95 backdrop-blur-sm shadow-xl lg:border-r border-b lg:border-b-0 border-slate-200/60 flex-shrink-0 overflow-y-auto lg:max-h-[90vh]">
-              <div className="p-4 sm:p-6">
+          <div className="flex h-[90vh]">
+            {/* Sidebar */}
+            <aside className="w-80 bg-white/95 backdrop-blur-sm shadow-xl border-r border-slate-200/60 flex-shrink-0 overflow-y-auto">
+              <div className="p-6">
                 {/* Profile */}
                 <div className="flex flex-col items-center text-center mb-6">
                   <Avatar className="w-20 h-20 ring-2 ring-blue-100">
@@ -835,9 +835,9 @@ const SantriFormWizard: React.FC<SantriFormWizardProps> = ({ santriId, onClose, 
               </div>
             </aside>
 
-            {/* Main Content - Responsif */}
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            {/* Main Content */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6">
                 <div className="space-y-6">
                   {activeTab === 'kategori' && (
                     <KategoriStep
@@ -891,9 +891,9 @@ const SantriFormWizard: React.FC<SantriFormWizardProps> = ({ santriId, onClose, 
                 </div>
               </div>
               
-              {/* Footer - Responsif */}
-              <div className="border-t border-slate-200/60 bg-white/95 backdrop-blur-sm px-4 sm:px-6 py-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              {/* Footer */}
+              <div className="border-t border-slate-200/60 bg-white/95 backdrop-blur-sm px-6 py-4">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`w-3 h-3 rounded-full ${isFormValid() ? 'bg-green-500' : 'bg-amber-500'}`} />
                     <div className="text-sm">
@@ -905,20 +905,15 @@ const SantriFormWizard: React.FC<SantriFormWizardProps> = ({ santriId, onClose, 
                     </div>
                   </div>
                   
-                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                    <Button 
-                      variant="outline" 
-                      onClick={onClose} 
-                      disabled={isLoading}
-                      className="w-full sm:w-auto"
-                    >
+                  <div className="flex gap-3">
+                    <Button variant="outline" onClick={onClose} disabled={isLoading}>
                       <X className="w-4 h-4 mr-2" />
                       Batal
                     </Button>
                     <Button 
                       onClick={handleSubmit} 
                       disabled={isLoading || !isFormValid()} 
-                      className="w-full sm:w-auto bg-primary hover:bg-primary/90"
+                      className="bg-gradient-to-r from-blue-600 to-blue-700"
                     >
                       <Save className="w-4 h-4 mr-2" />
                       {isLoading ? 'Menyimpan...' : 'Simpan Data'}
