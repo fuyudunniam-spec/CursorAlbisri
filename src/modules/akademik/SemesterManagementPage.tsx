@@ -685,6 +685,19 @@ const SemesterManagementPage: React.FC = () => {
                 />
               </div>
             </div>
+            <div>
+              <Label>Status *</Label>
+              <Select
+                value={semesterForm.status}
+                onValueChange={(value) => setSemesterForm(prev => ({ ...prev, status: value as SemesterStatus }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Aktif">Aktif</SelectItem>
+                  <SelectItem value="Ditutup">Ditutup</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-2">
               <input
                 id="semester-active"
