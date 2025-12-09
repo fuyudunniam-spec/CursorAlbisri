@@ -675,6 +675,19 @@ const SemesterManagementPage: React.FC = () => {
                 />
               </div>
             </div>
+            <div>
+              <Label>Status *</Label>
+              <Select
+                value={semesterForm.status}
+                onValueChange={(value) => setSemesterForm(prev => ({ ...prev, status: value as SemesterStatus }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Aktif">Aktif</SelectItem>
+                  <SelectItem value="Ditutup">Ditutup</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-2">
               <input
                 id="semester-active"
@@ -686,15 +699,6 @@ const SemesterManagementPage: React.FC = () => {
               <Label htmlFor="semester-active" className="text-sm cursor-pointer">
                 Jadikan semester aktif setelah dibuat
               </Label>
-            </div>
-                onValueChange={(value) => setSemesterForm(prev => ({ ...prev, status: value as SemesterStatus }))}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Aktif">Aktif</SelectItem>
-                  <SelectItem value="Ditutup">Ditutup</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
             {!createSemesterDialog.editingSemester && (
               <div>
@@ -722,16 +726,6 @@ const SemesterManagementPage: React.FC = () => {
                 </p>
               </div>
             )}
-            <div className="flex items-center gap-2">
-              <input
-                id="semester-active"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={semesterForm.is_aktif}
-                onChange={(e) => setSemesterForm(prev => ({ ...prev, is_aktif: e.target.checked }))}
-              />
-              <Label htmlFor="semester-active" className="text-sm cursor-pointer">Jadikan semester aktif setelah dibuat</Label>
-            </div>
           </div>
           <DialogFooter>
             <Button 
