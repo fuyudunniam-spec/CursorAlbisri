@@ -29,6 +29,8 @@ export interface KoperasiProduk {
   updated_at: string;
   created_by: string | null;
   updated_by: string | null;
+  stok?: number; // Stock quantity (optional for backward compatibility)
+  stock?: number; // Alternative field name (for backward compatibility)
 }
 
 export interface KoperasiProdukInsert {
@@ -47,6 +49,7 @@ export interface KoperasiProdukInsert {
   is_active?: boolean;
   inventaris_id?: string;
   sumber_modal_id?: string; // Sumber modal ID for yayasan products
+  stok?: number; // Stock quantity
 }
 
 export interface KoperasiSupplier {

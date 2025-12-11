@@ -607,12 +607,12 @@ const Layout = ({ children }: LayoutProps) => {
     <div className="min-h-screen bg-gray-50 flex">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-[100] lg:hidden">
           <div 
             className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity" 
             onClick={() => setSidebarOpen(false)} 
           />
-          <div className="fixed inset-y-0 left-0 flex flex-col max-w-xs w-full bg-white shadow-xl h-screen">
+          <div className="fixed inset-y-0 left-0 flex flex-col max-w-xs w-full bg-white shadow-xl h-screen z-[101]">
             <div className="absolute top-0 right-0 -mr-12 pt-2">
               <Button
                 variant="ghost"

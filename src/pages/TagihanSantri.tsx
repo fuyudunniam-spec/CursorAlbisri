@@ -1366,7 +1366,7 @@ const TagihanSantri: React.FC = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="orang_tua">Orang Tua / Wali</SelectItem>
-                    <SelectItem value="donatur">Donatur (Orang Tua Asuh Pendidikan)</SelectItem>
+                    <SelectItem value="donatur">Orang Tua Asuh Pendidikan</SelectItem>
                     <SelectItem value="yayasan">Yayasan / Subsidi Internal</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1374,17 +1374,17 @@ const TagihanSantri: React.FC = () => {
 
               {paymentForm.sumber_pembayaran === 'donatur' && (
                 <div className="space-y-2 animate-in slide-in-from-top-2">
-                  <Label className="text-sm font-medium text-gray-700">Pilih Donatur / Kampanye *</Label>
+                  <Label className="text-sm font-medium text-gray-700">Pilih Orang Tua Asuh Pendidikan / Kampanye *</Label>
                   <Select
                     value={paymentForm.donatur_id}
                     onValueChange={(value) => setPaymentForm({ ...paymentForm, donatur_id: value })}
                   >
                     <SelectTrigger className="border-gray-200 focus:border-blue-500">
-                      <SelectValue placeholder="Pilih donatur/kampanye" />
+                      <SelectValue placeholder="Pilih orang tua asuh pendidikan/kampanye" />
                     </SelectTrigger>
                     <SelectContent>
                       {donaturList.length === 0 ? (
-                        <SelectItem value="" disabled>Tidak ada donatur tersedia</SelectItem>
+                        <SelectItem value="" disabled>Tidak ada orang tua asuh pendidikan tersedia</SelectItem>
                       ) : (
                         donaturList.map(donatur => (
                           <SelectItem key={donatur.id} value={donatur.id}>
@@ -1427,7 +1427,10 @@ const TagihanSantri: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="riwayat" className="space-y-6">
-          <RiwayatPembayaran tagihanId={filterTagihanId} />
+          <RiwayatPembayaran 
+            tagihanId={filterTagihanId} 
+            santriIds={selectedSantriIds.length > 0 ? selectedSantriIds : undefined}
+          />
         </TabsContent>
       </Tabs>
     </div>

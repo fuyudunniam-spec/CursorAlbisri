@@ -30,6 +30,8 @@ import StockOpnameKoperasi from './components/StockOpnameKoperasi';
 import KategoriManagement from './components/KategoriManagement';
 import SupplierManagement from './components/SupplierManagement';
 import ImportExportData from './components/ImportExportData';
+import PengajuanItemYayasanApproval from './components/PengajuanItemYayasanApproval';
+import AjukanTransferDialog from './components/AjukanTransferDialog';
 import type { KoperasiProduk } from '@/types/koperasi.types';
 
 export default function MasterProdukPage() {
@@ -38,30 +40,101 @@ export default function MasterProdukPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProduk, setEditingProduk] = useState<KoperasiProduk | null>(null);
   const [yayasanSearch, setYayasanSearch] = useState('');
-  const [hargaDialogOpen, setHargaDialogOpen] = useState(false);
+  const [ajukanTransferDialogOpen, setAjukanTransferDialogOpen] = useState(false);
   const [selectedYayasanItem, setSelectedYayasanItem] = useState<any>(null);
-  const [hargaJualEcer, setHargaJualEcer] = useState('');
-  const [hargaJualGrosir, setHargaJualGrosir] = useState('');
-  const [hargaHppKoperasi, setHargaHppKoperasi] = useState('');
   const queryClient = useQueryClient();
+
+  // Fetch total count (for display)
+  const { data: totalCount = 0 } = useQuery({
+    queryKey: ['koperasi-produk-total-count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('kop_barang')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_active', true);
+      
+      if (error) throw error;
+      return count || 0;
+    },
+  });
 
   // Fetch produk list with stock
   const { data: produkList = [], isLoading } = useQuery({
     queryKey: ['koperasi-produk-with-stock', search],
     queryFn: async () => {
-      // Use view to get stock info
+      // Query from kop_barang with join to kop_kategori to get kategori name
+      // Note: Supabase PostgREST doesn't support 'as' alias, so we map in client side
       let query = supabase
-        .from('v_koperasi_stock')
-        .select('*')
-        .order('nama_produk');
+        .from('kop_barang')
+        .select(`
+          id,
+          kode_barang,
+          nama_barang,
+          kategori_id,
+          satuan_dasar,
+          harga_beli,
+          harga_jual_ecer,
+          harga_jual_grosir,
+          stok,
+          stok_minimum,
+          owner_type,
+          inventaris_id,
+          is_active,
+          kop_kategori:kategori_id(nama)
+        `)
+        .eq('is_active', true)
+        .order('nama_barang');
 
       if (search) {
-        query = query.or(`nama_produk.ilike.%${search}%,kode_produk.ilike.%${search}%`);
+        query = query.or(`nama_barang.ilike.%${search}%,kode_barang.ilike.%${search}%`);
       }
 
       const { data, error } = await query;
       if (error) throw error;
-      return data || [];
+      
+      // Fetch all kategori untuk mapping (fallback jika join tidak berfungsi)
+      const { data: kategoriList } = await supabase
+        .from('kop_kategori')
+        .select('id, nama');
+      
+      const kategoriMap = new Map(
+        (kategoriList || []).map((k: any) => [k.id, k.nama])
+      );
+      
+      // Map to include stock status, calculate values, and rename columns
+      return (data || []).map((item: any) => {
+        const stock = Number(item.stok || 0);
+        const stockMin = Number(item.stok_minimum || 5);
+        let statusStock = 'aman';
+        if (stock === 0) statusStock = 'habis';
+        else if (stock <= stockMin) statusStock = 'menipis';
+        
+        // Get kategori name from join or fallback to map
+        const kategoriName = item.kop_kategori?.nama || 
+                            (item.kategori_id ? kategoriMap.get(item.kategori_id) : null) || 
+                            null;
+        
+        return {
+          produk_id: item.id,
+          kode_produk: item.kode_barang,
+          nama_produk: item.nama_barang,
+          kategori_id: item.kategori_id,
+          kategori: kategoriName,
+          satuan: item.satuan_dasar,
+          harga_beli: item.harga_beli,
+          harga_jual: item.harga_jual_ecer,
+          harga_jual_ecer: item.harga_jual_ecer,
+          harga_jual_grosir: item.harga_jual_grosir,
+          stock: stock,
+          stok: stock, // Add stok field for form compatibility
+          stock_minimum: stockMin,
+          status_stock: statusStock,
+          nilai_stock: stock * Number(item.harga_beli || 0),
+          owner_type: item.owner_type || 'koperasi',
+          inventaris_id: item.inventaris_id,
+          is_active: item.is_active,
+        };
+      });
     },
   });
 
@@ -92,6 +165,7 @@ export default function MasterProdukPage() {
           kop_barang!left(
             id,
             kode_barang,
+            stok,
             harga_beli,
             harga_jual_ecer,
             harga_jual_grosir,
@@ -107,6 +181,33 @@ export default function MasterProdukPage() {
 
       const { data, error } = await query;
       if (error) throw error;
+
+      // Get latest pengajuan status for each item
+      const itemIds = (data || []).map((item: any) => item.id);
+      if (itemIds.length > 0) {
+        const { data: pengajuanData } = await supabase
+          .from('pengajuan_item_yayasan')
+          .select('inventaris_item_id, status, created_at')
+          .in('inventaris_item_id', itemIds)
+          .order('created_at', { ascending: false });
+
+        // Create map of latest status per item
+        const statusMap = new Map<string, string>();
+        if (pengajuanData) {
+          pengajuanData.forEach((p: any) => {
+            if (!statusMap.has(p.inventaris_item_id)) {
+              statusMap.set(p.inventaris_item_id, p.status);
+            }
+          });
+        }
+
+        // Add status to each item
+        return (data || []).map((item: any) => ({
+          ...item,
+          pengajuan_status: statusMap.get(item.id) || null,
+        }));
+      }
+
       return data || [];
     },
     enabled: activeTab === 'yayasan-items',
@@ -123,6 +224,8 @@ export default function MasterProdukPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
+      queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['koperasi-produk-total-count'] });
       toast.success('Produk berhasil dihapus');
     },
     onError: (error: any) => {
@@ -151,163 +254,18 @@ export default function MasterProdukPage() {
     return ((hargaJual - hargaBeli) / hargaBeli * 100).toFixed(1);
   };
 
-  // Handle tambah item yayasan ke daftar jual
-  const handleTambahKeDaftarJual = (item: any) => {
-    setSelectedYayasanItem(item);
-    const kopBarang = item.kop_barang?.[0];
-    setHargaJualEcer(kopBarang?.harga_jual_ecer?.toString() || '');
-    setHargaJualGrosir(kopBarang?.harga_jual_grosir?.toString() || '');
-    // Default HPP koperasi dari kop_barang jika sudah ada, jika belum pakai hpp_yayasan (jika ada)
-    const defaultHpp = (kopBarang?.harga_beli ?? item.hpp_yayasan ?? 0) as number;
-    setHargaHppKoperasi(defaultHpp ? defaultHpp.toString() : '');
-    setHargaDialogOpen(true);
-  };
-
-  // Handle ubah harga item yayasan
-  const handleUbahHarga = (item: any) => {
-    setSelectedYayasanItem(item);
-    const kopBarang = item.kop_barang?.[0];
-    setHargaJualEcer(kopBarang?.harga_jual_ecer?.toString() || '');
-    setHargaJualGrosir(kopBarang?.harga_jual_grosir?.toString() || '');
-    const defaultHpp = (kopBarang?.harga_beli ?? item.hpp_yayasan ?? 0) as number;
-    setHargaHppKoperasi(defaultHpp ? defaultHpp.toString() : '');
-    setHargaDialogOpen(true);
-  };
-
-  // Save harga jual koperasi + HPP koperasi
-  const saveHargaMutation = useMutation({
-    mutationFn: async ({ itemId, hargaEcer, hargaGrosir, hppKoperasi }: { itemId: string; hargaEcer: number; hargaGrosir: number; hppKoperasi: number }) => {
-      const existingKopBarang = selectedYayasanItem?.kop_barang?.[0];
-      
-      if (existingKopBarang) {
-        // Update existing kop_barang (termasuk HPP koperasi)
-        const { error } = await supabase
-          .from('kop_barang')
-          .update({ 
-            harga_beli: hppKoperasi,
-            harga_transfer: hppKoperasi,
-            harga_jual_ecer: hargaEcer,
-            harga_jual_grosir: hargaGrosir,
-            is_active: true // Pastikan item aktif setelah update harga
-          })
-          .eq('id', existingKopBarang.id);
-        if (error) throw error;
-      } else {
-        // Create new kop_barang
-        const { data: kategoriData } = await supabase
-          .from('kop_kategori')
-          .select('id')
-          .limit(1)
-          .single();
-
-        const { data: sumberModalData } = await supabase
-          .from('kop_sumber_modal')
-          .select('id')
-          .limit(1)
-          .single();
-
-        // Generate kode barang YYS-0001, YYS-0002, dst jika belum ada kode_inventaris
-        let kodeBarang = selectedYayasanItem.kode_inventaris as string | null;
-        if (!kodeBarang) {
-          const prefix = 'YYS-';
-          const { data: lastKodeData, error: kodeError } = await supabase
-            .from('kop_barang')
-            .select('kode_barang')
-            .like('kode_barang', `${prefix}%`)
-            .order('kode_barang', { ascending: false })
-            .limit(1);
-
-          if (kodeError) throw kodeError;
-
-          let nextNum = 1;
-          if (lastKodeData && lastKodeData.length > 0 && lastKodeData[0].kode_barang) {
-            const match = lastKodeData[0].kode_barang.match(/^YYS-(\\d+)$/);
-            if (match) {
-              nextNum = parseInt(match[1], 10) + 1;
-            }
-          }
-
-          kodeBarang = `${prefix}${nextNum.toString().padStart(4, '0')}`;
-        }
-
-        const finalHpp = hppKoperasi || 0;
-        const { error } = await supabase
-          .from('kop_barang')
-          .insert({
-            inventaris_id: itemId,
-            kode_barang: kodeBarang,
-            nama_barang: selectedYayasanItem.nama_barang,
-            kategori_id: kategoriData?.id || null,
-            sumber_modal_id: sumberModalData?.id || null,
-            harga_beli: finalHpp, // HPP koperasi (transaksi ke yayasan)
-            harga_transfer: finalHpp,
-            harga_jual_ecer: hargaEcer,
-            harga_jual_grosir: hargaGrosir,
-            satuan_dasar: selectedYayasanItem.satuan || 'pcs',
-            owner_type: 'yayasan',
-            stok: selectedYayasanItem.jumlah || 0,
-            is_active: true,
-          });
-        if (error) throw error;
-
-        // Update inventaris flags
-        await supabase
-          .from('inventaris')
-          .update({
-            is_komoditas: true,
-            boleh_dijual_koperasi: true
-          })
-          .eq('id', itemId);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['koperasi-yayasan-items'] });
-      queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
-      queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
-      toast.success('Harga jual berhasil disimpan');
-      setHargaDialogOpen(false);
-      setSelectedYayasanItem(null);
-      setHargaJualEcer('');
-      setHargaJualGrosir('');
-    },
-    onError: (error: any) => {
-      toast.error(error.message || 'Gagal menyimpan harga jual');
-    },
-  });
-
-  const handleSaveHarga = () => {
-    if (!selectedYayasanItem || !hargaJualEcer || !hargaJualGrosir) {
-      toast.error('Harga ecer dan grosir harus diisi');
-      return;
-    }
-    const hargaEcer = parseFloat(hargaJualEcer);
-    const hargaGrosir = parseFloat(hargaJualGrosir);
-    const hppKoperasi = hargaHppKoperasi ? parseFloat(hargaHppKoperasi) : 0;
-
-    if (isNaN(hargaEcer) || hargaEcer <= 0) {
-      toast.error('Harga ecer harus berupa angka positif');
-      return;
-    }
-    if (isNaN(hargaGrosir) || hargaGrosir <= 0) {
-      toast.error('Harga grosir harus berupa angka positif');
-      return;
-    }
-    if (hargaGrosir >= hargaEcer) {
-      toast.error('Harga grosir harus lebih kecil dari harga ecer');
-      return;
-    }
-    if (hppKoperasi < 0) {
-      toast.error('HPP koperasi tidak boleh negatif');
-      return;
-    }
-
-    saveHargaMutation.mutate({
-      itemId: selectedYayasanItem.id,
-      hargaEcer,
-      hargaGrosir,
-      hppKoperasi,
+  // Handle ajukan transfer ke koperasi
+  const handleAjukanTransfer = (item: any) => {
+    setSelectedYayasanItem({
+      id: item.id,
+      nama_barang: item.nama_barang,
+      jumlah: item.jumlah || 0,
+      satuan: item.satuan || '',
+      harga_perolehan: item.harga_perolehan || null,
     });
+    setAjukanTransferDialogOpen(true);
   };
+
 
   return (
     <div className="space-y-6">
@@ -323,10 +281,14 @@ export default function MasterProdukPage() {
       </div>
 
       <Tabs defaultValue="products" value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-7 lg:w-auto">
+        <TabsList className="grid w-full grid-cols-8 lg:w-auto">
           <TabsTrigger value="products" className="flex items-center gap-2">
             <Package className="h-4 w-4" />
             <span className="hidden sm:inline">Produk</span>
+          </TabsTrigger>
+          <TabsTrigger value="approval" className="flex items-center gap-2">
+            <Building2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Approval</span>
           </TabsTrigger>
           <TabsTrigger value="yayasan-items" className="flex items-center gap-2">
             <Store className="h-4 w-4" />
@@ -361,7 +323,7 @@ export default function MasterProdukPage() {
         <TabsContent value="products" className="mt-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center justify-between gap-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                   <Input
@@ -370,6 +332,18 @@ export default function MasterProdukPage() {
                     onChange={(e) => setSearch(e.target.value)}
                     className="pl-10"
                   />
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {search ? (
+                    <>
+                      Menampilkan: <span className="font-semibold text-foreground">{produkList.length}</span> dari{' '}
+                      <span className="font-semibold text-foreground">{totalCount}</span> produk
+                    </>
+                  ) : (
+                    <>
+                      Total: <span className="font-semibold text-foreground">{totalCount}</span> produk
+                    </>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -401,24 +375,43 @@ export default function MasterProdukPage() {
                       {produkList
                         .filter((produk: any) => {
                           const kode = String(produk.kode_produk || '');
-                          // Tab Produk hanya menampilkan item koperasi dengan kode KOP-xxxx
-                          return kode.startsWith('KOP-') || (!kode.startsWith('YYS-') && !kode.startsWith('PRD-'));
+                          // Tab Produk menampilkan semua produk (KOP- dan YYS-)
+                          return kode.startsWith('KOP-') || kode.startsWith('YYS-');
                         })
-                        .map((produk: any) => (
-                        <tr key={produk.produk_id} className="border-b hover:bg-muted/50">
-                          <td className="p-3 font-mono text-sm">{produk.kode_produk}</td>
-                          <td className="p-3">{produk.nama_produk}</td>
-                          <td className="p-3">
-                            <Badge variant="outline">{produk.kategori || '-'}</Badge>
-                          </td>
+                        .map((produk: any) => {
+                          const ownerType = produk.owner_type || 'koperasi';
+                          return (
+                          <tr key={produk.produk_id} className="border-b hover:bg-muted/50">
+                            <td className="p-3 font-mono text-sm">{produk.kode_produk}</td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span>{produk.nama_produk}</span>
+                                <Badge 
+                                  variant={ownerType === 'yayasan' ? 'outline' : 'secondary'} 
+                                  className="text-xs shrink-0"
+                                >
+                                  {ownerType === 'yayasan' ? 'Yayasan' : 'Koperasi'}
+                                </Badge>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <Badge variant="outline">{produk.kategori || '-'}</Badge>
+                            </td>
                           <td className="p-3 text-right">
-                            <span className={`font-semibold ${
-                              produk.status_stock === 'habis' ? 'text-red-600' :
-                              produk.status_stock === 'menipis' ? 'text-orange-600' :
-                              'text-green-600'
-                            }`}>
-                              {Number(produk.stock || 0).toLocaleString('id-ID')}
-                            </span>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className={`font-semibold ${
+                                produk.status_stock === 'habis' ? 'text-red-600' :
+                                produk.status_stock === 'menipis' ? 'text-orange-600' :
+                                'text-green-600'
+                              }`}>
+                                {Number(produk.stock || 0).toLocaleString('id-ID')}
+                              </span>
+                              {produk.owner_type === 'yayasan' && produk.inventaris_id && (
+                                <span className="text-xs text-muted-foreground">
+                                  (Stok Koperasi)
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">{produk.satuan}</td>
                           <td className="p-3 text-right">
@@ -434,9 +427,15 @@ export default function MasterProdukPage() {
                           </td>
                           <td className="p-3 text-right">
                             <div className="text-sm">
-                              <div>Rp {Number(produk.harga_jual_grosir || produk.harga_jual || 0).toLocaleString('id-ID')}</div>
+                              <div>
+                                {produk.harga_jual_grosir === 0 
+                                  ? 'Rp 0 (Eceran saja)' 
+                                  : `Rp ${Number(produk.harga_jual_grosir || produk.harga_jual || 0).toLocaleString('id-ID')}`}
+                              </div>
                               <div className="text-xs text-muted-foreground">
-                                ({calculateMargin(Number(produk.harga_beli || 0), Number(produk.harga_jual_grosir || produk.harga_jual || 0))}%)
+                                {produk.harga_jual_grosir === 0 
+                                  ? '(Hanya eceran)'
+                                  : `(${calculateMargin(Number(produk.harga_beli || 0), Number(produk.harga_jual_grosir || produk.harga_jual || 0))}%)`}
                               </div>
                             </div>
                           </td>
@@ -459,13 +458,19 @@ export default function MasterProdukPage() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Tab: Item Yayasan (Approval) */}
+        <TabsContent value="approval" className="mt-6">
+          <PengajuanItemYayasanApproval />
         </TabsContent>
 
         {/* Tab: Item Yayasan (Komoditas) */}
@@ -500,18 +505,27 @@ export default function MasterProdukPage() {
                         <th className="text-left p-3">Kode Inventaris</th>
                         <th className="text-left p-3">Nama Barang</th>
                         <th className="text-left p-3">Kategori</th>
-                        <th className="text-right p-3">Stok</th>
-                        <th className="text-right p-3">HPP Koperasi</th>
-                        <th className="text-right p-3">Harga Jual</th>
-                        <th className="text-left p-3">Status</th>
+                        <th className="text-right p-3">Stok Yayasan</th>
                         <th className="text-center p-3">Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
                       {yayasanItems.map((item: any) => {
                         const kopBarang = item.kop_barang?.[0];
-                        const isConfigured = !!kopBarang;
-                        const hppKoperasi = kopBarang?.harga_beli ?? null;
+                        const stokKoperasi = kopBarang?.stok || 0;
+                        const pengajuanStatus = item.pengajuan_status;
+
+                        // Determine status badge
+                        let statusBadge = null;
+                        if (!pengajuanStatus) {
+                          statusBadge = <Badge variant="outline">Belum diajukan</Badge>;
+                        } else if (pengajuanStatus === 'pending_koperasi') {
+                          statusBadge = <Badge variant="default" className="bg-yellow-500">Menunggu approval</Badge>;
+                        } else if (pengajuanStatus === 'disetujui' || pengajuanStatus === 'selesai') {
+                          statusBadge = <Badge variant="default" className="bg-green-500">Disetujui</Badge>;
+                        } else if (pengajuanStatus === 'ditolak') {
+                          statusBadge = <Badge variant="destructive">Ditolak</Badge>;
+                        }
 
                         return (
                           <tr key={item.id} className="border-b hover:bg-muted/50">
@@ -521,74 +535,35 @@ export default function MasterProdukPage() {
                               <Badge variant="outline">{item.kategori || '-'}</Badge>
                             </td>
                             <td className="p-3 text-right">
-                              <span className={`font-semibold ${
-                                (item.jumlah || 0) === 0 ? 'text-red-600' :
-                                (item.jumlah || 0) <= (item.min_stock || 10) ? 'text-orange-600' :
-                                'text-green-600'
-                              }`}>
-                                {Number(item.jumlah || 0).toLocaleString('id-ID')} {item.satuan || ''}
-                              </span>
-                            </td>
-                            <td className="p-3 text-right">
-                              {hppKoperasi && hppKoperasi > 0 ? (
-                                <span className="text-sm font-medium">
-                                  Rp {Number(hppKoperasi).toLocaleString('id-ID')}
+                              <div className="flex flex-col items-end gap-1">
+                                <span className={`font-semibold ${
+                                  (item.jumlah || 0) === 0 ? 'text-red-600' :
+                                  (item.jumlah || 0) <= (item.min_stock || 10) ? 'text-orange-600' :
+                                  'text-green-600'
+                                }`}>
+                                  {Number(item.jumlah || 0).toLocaleString('id-ID')} {item.satuan || ''}
                                 </span>
-                              ) : (
-                                <span className="text-muted-foreground text-sm">-</span>
-                              )}
-                            </td>
-                            <td className="p-3 text-right">
-                              {isConfigured ? (
-                                <div className="text-sm font-medium space-y-1">
-                                  <div>
-                                    Rp {Number(kopBarang.harga_jual_ecer || 0).toLocaleString('id-ID')}
-                                    <span className="text-xs text-muted-foreground ml-1">(Ecer)</span>
-                                  </div>
-                                  {kopBarang.harga_jual_grosir ? (
-                                    <div className="text-xs text-muted-foreground">
-                                      Grosir: Rp {Number(kopBarang.harga_jual_grosir).toLocaleString('id-ID')}
-                                    </div>
-                                  ) : (
-                                    <div className="text-xs text-muted-foreground">
-                                      Grosir belum diatur
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground text-sm">-</span>
-                              )}
-                            </td>
-                            <td className="p-3">
-                              {isConfigured ? (
-                                <Badge variant="default" className="gap-1">
-                                  <Store className="h-3 w-3" />
-                                  Terkonfigurasi
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary">Belum Dikonfigurasi</Badge>
-                              )}
-                            </td>
-                            <td className="p-3">
-                              <div className="flex justify-center gap-2">
-                                {isConfigured ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleUbahHarga(item)}
-                                  >
-                                    <DollarSign className="w-4 h-4 mr-1" />
-                                    Ubah Harga
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleTambahKeDaftarJual(item)}
-                                  >
-                                    <Plus className="w-4 h-4 mr-1" />
-                                    Tambah ke Daftar Jual
-                                  </Button>
+                                {stokKoperasi > 0 && (
+                                  <span className="text-xs text-muted-foreground">
+                                    (Stok Koperasi: {Number(stokKoperasi).toLocaleString('id-ID')})
+                                  </span>
                                 )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              {statusBadge}
+                            </td>
+                            <td className="p-3">
+                              <div className="flex justify-center">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleAjukanTransfer(item)}
+                                  disabled={(item.jumlah || 0) === 0 || pengajuanStatus === 'pending_koperasi'}
+                                  variant={pengajuanStatus === 'pending_koperasi' ? 'outline' : 'default'}
+                                >
+                                  <Plus className="w-4 h-4 mr-1" />
+                                  {pengajuanStatus === 'pending_koperasi' ? 'Sudah diajukan' : 'Ajukan ke Koperasi'}
+                                </Button>
                               </div>
                             </td>
                           </tr>
@@ -699,124 +674,21 @@ export default function MasterProdukPage() {
       </Tabs>
 
       <ProdukFormDialog
+        key={editingProduk?.id || 'new'} // Force re-render when produk changes
         open={isDialogOpen}
         onClose={handleCloseDialog}
         produk={editingProduk}
       />
 
-      {/* Dialog untuk set harga jual koperasi */}
-      <Dialog open={hargaDialogOpen} onOpenChange={setHargaDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {selectedYayasanItem?.kop_barang?.[0] ? 'Ubah Harga Jual' : 'Tambah ke Daftar Jual'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label>Nama Barang</Label>
-              <p className="text-sm font-medium mt-1">{selectedYayasanItem?.nama_barang}</p>
-            </div>
-            <div>
-              <Label>Kode Inventaris</Label>
-              <p className="text-sm text-muted-foreground font-mono mt-1">
-                {selectedYayasanItem?.kode_inventaris || '-'}
-              </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="hpp-koperasi">HPP Koperasi (Rp)</Label>
-                <Input
-                  id="hpp-koperasi"
-                  type="number"
-                  value={hargaHppKoperasi}
-                  onChange={(e) => setHargaHppKoperasi(e.target.value)}
-                  placeholder="Contoh: 15000"
-                  min="0"
-                  step="100"
-                />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  HPP = harga yang disepakati antara Yayasan dan Koperasi.
-                  Selisih antara harga jual dan HPP menjadi laba koperasi, HPP dicatat sebagai beban ke Yayasan.
-                </p>
-              </div>
-              <div>
-                <Label htmlFor="harga-ecer">Harga Ecer (Rp) *</Label>
-                <Input
-                  id="harga-ecer"
-                  type="number"
-                  value={hargaJualEcer}
-                  onChange={(e) => setHargaJualEcer(e.target.value)}
-                  placeholder="Harga ecer"
-                  min="0"
-                  step="100"
-                />
-              </div>
-              <div>
-                <Label htmlFor="harga-grosir">Harga Grosir (Rp) *</Label>
-                <Input
-                  id="harga-grosir"
-                  type="number"
-                  value={hargaJualGrosir}
-                  onChange={(e) => setHargaJualGrosir(e.target.value)}
-                  placeholder="Harga grosir"
-                  min="0"
-                  step="100"
-                />
-              </div>
-            </div>
-            {(hargaHppKoperasi || selectedYayasanItem?.hpp_yayasan) && (
-              <div className="bg-muted/50 p-3 rounded-lg space-y-1">
-                {hargaHppKoperasi && !isNaN(parseFloat(hargaHppKoperasi)) && (
-                  <p className="text-xs text-muted-foreground flex justify-between">
-                    <span>HPP Koperasi (transaksi ke Yayasan)</span>
-                    <span className="font-medium">Rp {Number(parseFloat(hargaHppKoperasi)).toLocaleString('id-ID')}</span>
-                  </p>
-                )}
-                {selectedYayasanItem?.hpp_yayasan && (
-                  <p className="text-xs text-muted-foreground flex justify-between">
-                    <span>HPP Referensi Yayasan</span>
-                    <span className="font-medium">Rp {Number(selectedYayasanItem.hpp_yayasan).toLocaleString('id-ID')}</span>
-                  </p>
-                )}
-                {hargaHppKoperasi && !isNaN(parseFloat(hargaHppKoperasi)) && hargaJualEcer && !isNaN(parseFloat(hargaJualEcer)) && (
-                  <p className="text-xs text-muted-foreground flex justify-between">
-                    <span>Margin Ecer (vs HPP Koperasi)</span>
-                    <span className="font-medium text-green-600">
-                      {((parseFloat(hargaJualEcer) - parseFloat(hargaHppKoperasi || '0')) / (parseFloat(hargaHppKoperasi || '1')) * 100).toFixed(1)}%
-                    </span>
-                  </p>
-                )}
-                {hargaHppKoperasi && !isNaN(parseFloat(hargaHppKoperasi)) && hargaJualGrosir && !isNaN(parseFloat(hargaJualGrosir)) && (
-                  <p className="text-xs text-muted-foreground flex justify-between">
-                    <span>Margin Grosir (vs HPP Koperasi)</span>
-                    <span className="text-green-600 font-medium">
-                      {((parseFloat(hargaJualGrosir) - parseFloat(hargaHppKoperasi || '0')) / (parseFloat(hargaHppKoperasi || '1')) * 100).toFixed(1)}%
-                    </span>
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setHargaDialogOpen(false);
-              setSelectedYayasanItem(null);
-              setHargaJualEcer('');
-              setHargaJualGrosir('');
-              setHargaHppKoperasi('');
-            }}>
-              Batal
-            </Button>
-            <Button 
-              onClick={handleSaveHarga}
-              disabled={saveHargaMutation.isPending}
-            >
-              {saveHargaMutation.isPending ? 'Menyimpan...' : 'Simpan'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Dialog untuk ajukan transfer ke koperasi */}
+      <AjukanTransferDialog
+        open={ajukanTransferDialogOpen}
+        onClose={() => {
+          setAjukanTransferDialogOpen(false);
+          setSelectedYayasanItem(null);
+        }}
+        item={selectedYayasanItem}
+      />
     </div>
   );
 }

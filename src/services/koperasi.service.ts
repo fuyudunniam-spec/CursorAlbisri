@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { addKeuanganTransaction } from '@/services/keuangan.service';
+import type { KoperasiPenjualanInsert } from '@/types/koperasi.types';
 
 // =====================================================
 // TYPES
@@ -678,7 +679,104 @@ export const koperasiService = {
     const startDate = filters?.startDate || new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString().split('T')[0];
     const endDate = filters?.endDate || new Date().toISOString().split('T')[0];
     
-    // 1. Get total penjualan (Pemasukan)
+    // 1. Get total penjualan from kop_penjualan (penjualan baru)
+    const { data: penjualanData } = await supabase
+      .from('kop_penjualan')
+      .select(`
+        id,
+        tanggal,
+        total_transaksi,
+        kop_penjualan_detail(
+          hpp_snapshot,
+          margin,
+          subtotal
+        )
+      `)
+      .eq('status_pembayaran', 'lunas')
+      .gte('tanggal', startDate)
+      .lte('tanggal', endDate);
+    
+    // Calculate totals from kop_penjualan
+    let totalPenjualanKop = 0;
+    let totalHPPKop = 0;
+    let totalLabaKotorKop = 0;
+    
+    if (penjualanData) {
+      penjualanData.forEach((p: any) => {
+        const totalTransaksi = parseFloat(p.total_transaksi || 0);
+        totalPenjualanKop += totalTransaksi;
+        
+        if (p.kop_penjualan_detail && p.kop_penjualan_detail.length > 0) {
+          p.kop_penjualan_detail.forEach((detail: any) => {
+            const subtotal = parseFloat(detail.subtotal || 0);
+            const margin = parseFloat(detail.margin || 0);
+            const itemHPP = subtotal - margin;
+            totalHPPKop += itemHPP;
+            totalLabaKotorKop += margin;
+          });
+        } else {
+          totalHPPKop += totalTransaksi * 0.5;
+          totalLabaKotorKop += totalTransaksi * 0.5;
+        }
+      });
+    }
+    
+    // 2. Get total penjualan from transaksi_inventaris (penjualan item yayasan historis)
+    const { data: invSalesData } = await supabase
+      .from('transaksi_inventaris')
+      .select(`
+        id,
+        tanggal,
+        harga_total,
+        harga_satuan,
+        jumlah,
+        inventaris!inner(
+          boleh_dijual_koperasi,
+          is_komoditas,
+          tipe_item,
+          hpp_yayasan,
+          harga_perolehan
+        )
+      `)
+      .eq('tipe', 'Keluar')
+      .eq('keluar_mode', 'Penjualan')
+      .or('channel.is.null,channel.eq.koperasi')
+      .not('harga_total', 'is', null)
+      .gt('harga_total', 0)
+      .gte('tanggal', startDate)
+      .lte('tanggal', endDate);
+    
+    // Filter hanya item yayasan yang boleh dijual koperasi
+    const filteredInvSales = (invSalesData || []).filter((tx: any) => {
+      const inventaris = tx.inventaris;
+      if (!inventaris) return false;
+      return inventaris.boleh_dijual_koperasi === true ||
+             inventaris.is_komoditas === true ||
+             inventaris.tipe_item === 'Komoditas';
+    });
+    
+    // Calculate totals from transaksi_inventaris
+    let totalPenjualanInv = 0;
+    let totalHPPInv = 0;
+    let totalLabaKotorInv = 0;
+    
+    filteredInvSales.forEach((tx: any) => {
+      const hargaTotal = parseFloat(tx.harga_total || 0);
+      const jumlah = parseFloat(tx.jumlah || 0);
+      const hppYayasan = tx.inventaris.hpp_yayasan || tx.inventaris.harga_perolehan || 0;
+      const totalHPP = hppYayasan * jumlah;
+      
+      totalPenjualanInv += hargaTotal;
+      totalHPPInv += totalHPP;
+      totalLabaKotorInv += (hargaTotal - totalHPP);
+    });
+    
+    // Combine totals
+    const totalPenjualan = totalPenjualanKop + totalPenjualanInv;
+    const totalHPP = totalHPPKop + totalHPPInv;
+    const totalLabaKotor = totalLabaKotorKop + totalLabaKotorInv;
+    
+    // Also get from keuangan_koperasi for verification
     const { data: pemasukanData } = await supabase
       .from('keuangan_koperasi')
       .select('jumlah, laba_kotor, hpp')
@@ -687,11 +785,11 @@ export const koperasiService = {
       .gte('tanggal', startDate)
       .lte('tanggal', endDate);
     
-    const totalPenjualan = (pemasukanData || []).reduce((sum, t) => sum + parseFloat(t.jumlah || 0), 0);
-    const totalLabaKotor = (pemasukanData || []).reduce((sum, t) => sum + parseFloat(t.laba_kotor || 0), 0);
-    const totalHPP = (pemasukanData || []).reduce((sum, t) => sum + parseFloat(t.hpp || 0), 0);
+    const totalPenjualanFromKeuangan = (pemasukanData || []).reduce((sum, t) => sum + parseFloat(t.jumlah || 0), 0);
+    const totalLabaKotorFromKeuangan = (pemasukanData || []).reduce((sum, t) => sum + parseFloat(t.laba_kotor || 0), 0);
+    const totalHPPFromKeuangan = (pemasukanData || []).reduce((sum, t) => sum + parseFloat(t.hpp || 0), 0);
     
-    // 2. Get total pengeluaran
+    // 3. Get total pengeluaran
     const { data: pengeluaranData } = await supabase
       .from('keuangan_koperasi')
       .select('jumlah')
@@ -702,7 +800,7 @@ export const koperasiService = {
     
     const totalPengeluaran = (pengeluaranData || []).reduce((sum, t) => sum + parseFloat(t.jumlah || 0), 0);
     
-    // 3. Get beban ke yayasan (bagian_yayasan dari penjualan)
+    // 4. Get beban ke yayasan (bagian_yayasan dari penjualan)
     const { data: bebanYayasanData } = await supabase
       .from('keuangan_koperasi')
       .select('bagian_yayasan')
@@ -713,7 +811,7 @@ export const koperasiService = {
     
     const bebanKeYayasan = (bebanYayasanData || []).reduce((sum, t) => sum + parseFloat(t.bagian_yayasan || 0), 0);
     
-    // 4. Get total setoran cash
+    // 5. Get total setoran cash
     const { data: setoranData } = await supabase
       .from('kop_setoran_cash_kasir')
       .select('jumlah_setor')
@@ -723,7 +821,7 @@ export const koperasiService = {
     
     const totalSetoranCash = (setoranData || []).reduce((sum, s) => sum + parseFloat(s.jumlah_setor || 0), 0);
     
-    // 5. Get saldo cash di kasir (penjualan cash - setoran)
+    // 6. Get saldo cash di kasir (penjualan cash - setoran)
     const { data: penjualanCashData } = await supabase
       .from('kop_penjualan')
       .select('total_transaksi')
@@ -735,7 +833,7 @@ export const koperasiService = {
     const totalPenjualanCash = (penjualanCashData || []).reduce((sum, p) => sum + parseFloat(p.total_transaksi || 0), 0);
     const saldoCashDiKasir = totalPenjualanCash - totalSetoranCash;
     
-    // 6. Get saldo kas koperasi
+    // 7. Get saldo kas koperasi
     const { data: akunKasData } = await supabase
       .from('akun_kas')
       .select('saldo_saat_ini')
@@ -744,19 +842,41 @@ export const koperasiService = {
     
     const saldoKasKoperasi = (akunKasData || []).reduce((sum, akun) => sum + parseFloat(akun.saldo_saat_ini || 0), 0);
     
-    // 7. Calculate laba bersih
+    // 8. Calculate laba bersih
     const labaBersih = totalLabaKotor - totalPengeluaran;
     
-    // 8. Get penjualan hari ini
+    // 9. Get penjualan hari ini (dari kop_penjualan + transaksi_inventaris)
     const today = new Date().toISOString().split('T')[0];
-    const { data: penjualanHariIniData } = await supabase
+    
+    // Penjualan dari kop_penjualan
+    const { data: penjualanHariIniKop } = await supabase
       .from('kop_penjualan')
       .select('id, total_transaksi')
       .eq('status_pembayaran', 'lunas')
       .eq('tanggal', today);
     
-    const penjualanHariIni = (penjualanHariIniData || []).reduce((sum, p) => sum + parseFloat(p.total_transaksi || 0), 0);
-    const totalTransaksiHariIni = penjualanHariIniData?.length || 0;
+    // Penjualan dari transaksi_inventaris (item yayasan)
+    const { data: penjualanHariIniInv } = await supabase
+      .from('transaksi_inventaris')
+      .select('id, harga_total, inventaris!inner(boleh_dijual_koperasi, is_komoditas, tipe_item)')
+      .eq('tipe', 'Keluar')
+      .eq('keluar_mode', 'Penjualan')
+      .or('channel.is.null,channel.eq.koperasi')
+      .not('harga_total', 'is', null)
+      .eq('tanggal', today);
+    
+    const filteredInvHariIni = (penjualanHariIniInv || []).filter((tx: any) => {
+      const inventaris = tx.inventaris;
+      if (!inventaris) return false;
+      return inventaris.boleh_dijual_koperasi === true ||
+             inventaris.is_komoditas === true ||
+             inventaris.tipe_item === 'Komoditas';
+    });
+    
+    const penjualanHariIniKopTotal = (penjualanHariIniKop || []).reduce((sum, p) => sum + parseFloat(p.total_transaksi || 0), 0);
+    const penjualanHariIniInvTotal = filteredInvHariIni.reduce((sum, tx) => sum + parseFloat(tx.harga_total || 0), 0);
+    const penjualanHariIni = penjualanHariIniKopTotal + penjualanHariIniInvTotal;
+    const totalTransaksiHariIni = (penjualanHariIniKop?.length || 0) + filteredInvHariIni.length;
     
     return {
       // Income/Revenue
@@ -989,6 +1109,83 @@ export const koperasiService = {
   },
 
   /**
+   * Create penjualan with atomic stock validation and profit sharing calculation
+   * Uses RPC function for atomic transaction
+   * 
+   * This function ensures:
+   * - Atomic stock validation with FOR UPDATE locking (prevents race condition)
+   * - Stock update and penjualan creation in single transaction
+   * - HPP, bagian_yayasan, and bagian_koperasi are always calculated and filled
+   * - Automatic kartu stok creation
+   */
+  async createPenjualan(data: KoperasiPenjualanInsert) {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    // Prepare items for RPC call
+    const itemsJson = data.items.map(item => ({
+      barang_id: item.produk_id,
+      jumlah: item.jumlah,
+      harga_satuan_jual: item.harga_jual,
+      tipe_harga: item.price_type || 'ecer',
+      sumber_modal_id: item.sumber_modal_id || null,
+    }));
+    
+    // Call atomic RPC function
+    const { data: result, error } = await supabase.rpc(
+      'rpc_create_penjualan_koperasi_atomic',
+      {
+        p_no_penjualan: data.no_penjualan,
+        p_tanggal: data.tanggal,
+        p_kasir_id: data.kasir_id,
+        p_subtotal: data.subtotal,
+        p_total: data.total,
+        p_items: itemsJson,
+        p_shift_id: data.shift_id || null,
+        p_anggota_id: null, // Can be added later if needed
+        p_tipe_pelanggan: 'umum', // Can be added later if needed
+        p_diskon: data.diskon,
+        p_metode_pembayaran: data.metode_bayar,
+        p_status_pembayaran: 'lunas',
+        p_user_id: user?.id || null,
+      }
+    );
+    
+    if (error) {
+      console.error('Error creating penjualan:', error);
+      throw new Error(error.message || 'Gagal membuat penjualan');
+    }
+    
+    if (!result || !result.success) {
+      throw new Error(result?.error || 'Gagal membuat penjualan');
+    }
+    
+    // Fetch created penjualan for return
+    const { data: penjualan, error: fetchError } = await supabase
+      .from('kop_penjualan')
+      .select(`
+        *,
+        kop_penjualan_detail(*)
+      `)
+      .eq('id', result.penjualan_id)
+      .single();
+    
+    if (fetchError) {
+      console.error('Error fetching created penjualan:', fetchError);
+      // Return partial data if fetch fails
+      return {
+        id: result.penjualan_id,
+        nomor_struk: result.no_penjualan,
+        total_hpp: result.total_hpp,
+        total_margin: result.total_margin,
+        total_bagian_yayasan: result.total_bagian_yayasan,
+        total_bagian_koperasi: result.total_bagian_koperasi,
+      };
+    }
+    
+    return penjualan;
+  },
+
+  /**
    * Update bulk sale item HPP and profit sharing (stub)
    */
   async updateBulkSaleItemHPPAndProfitSharing(updates: any[]) {
@@ -1106,12 +1303,9 @@ export const koperasiService = {
         })));
     }
     
-    // Add transaksi_inventaris sales - Filter hanya penjualan koperasi
+    // Add transaksi_inventaris sales - Filter hanya penjualan item yayasan yang boleh dijual koperasi
+    // Semua data historis dari Kalkulator HPP adalah item yayasan
     const filteredInvSales = (invSales || []).filter((s: any) => {
-      // Filter channel: hanya koperasi atau null
-      const channelValid = !s.channel || s.channel === 'koperasi' || s.channel === null;
-      if (!channelValid) return false;
-      
       // Filter item yayasan yang boleh dijual koperasi
       const inventaris = s.inventaris;
       if (!inventaris) return false;
@@ -1120,12 +1314,18 @@ export const koperasiService = {
                             inventaris.is_komoditas === true ||
                             inventaris.tipe_item === 'Komoditas';
       
-      // Apply owner type filter
-      if (filterOwnerType === 'all') return isYayasanItem;
-      if (filterOwnerType === 'koperasi') return inventaris.owner_type === 'koperasi';
-      if (filterOwnerType === 'yayasan') return inventaris.owner_type !== 'koperasi' && isYayasanItem;
+      if (!isYayasanItem) return false;
       
-      return isYayasanItem;
+      // Filter channel: hanya koperasi atau null (untuk data historis)
+      const channelValid = !s.channel || s.channel === 'koperasi' || s.channel === null;
+      if (!channelValid) return false;
+      
+      // Apply owner type filter
+      if (filterOwnerType === 'all') return true;
+      if (filterOwnerType === 'koperasi') return inventaris.owner_type === 'koperasi';
+      if (filterOwnerType === 'yayasan') return inventaris.owner_type !== 'koperasi';
+      
+      return true;
     });
     
     results = results.concat(filteredInvSales.map((s: any) => ({

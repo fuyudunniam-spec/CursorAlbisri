@@ -46,9 +46,10 @@ import KwitansiPembayaranSPP from './KwitansiPembayaranSPP';
 interface RiwayatPembayaranProps {
   tagihanId?: string;
   santriId?: string;
+  santriIds?: string[]; // Support multiple santri IDs
 }
 
-const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santriId }) => {
+const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santriId, santriIds }) => {
   const [payments, setPayments] = useState<PembayaranSantri[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -69,7 +70,7 @@ const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santri
   useEffect(() => {
     loadPayments();
     loadDonaturOptions();
-  }, [tagihanId, santriId, filterSumber, filterTanggalMulai, filterTanggalSelesai]);
+  }, [tagihanId, santriId, santriIds, filterSumber, filterTanggalMulai, filterTanggalSelesai]);
 
   const loadPayments = async () => {
     try {
@@ -80,7 +81,12 @@ const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santri
         data = await TagihanService.getPaymentHistory(tagihanId);
       } else {
         const filters: any = {};
-        if (santriId) filters.santri_id = santriId;
+        // Support multiple santri IDs
+        if (santriIds && santriIds.length > 0) {
+          filters.santri_ids = santriIds;
+        } else if (santriId) {
+          filters.santri_id = santriId;
+        }
         if (filterSumber !== 'all') filters.sumber_pembayaran = filterSumber;
         if (filterTanggalMulai) filters.tanggal_mulai = filterTanggalMulai;
         if (filterTanggalSelesai) filters.tanggal_selesai = filterTanggalSelesai;
@@ -196,7 +202,7 @@ const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santri
   const getSumberPembayaranLabel = (sumber: string) => {
     const labels: Record<string, string> = {
       'orang_tua': 'Orang Tua',
-      'donatur': 'Donatur',
+      'donatur': 'Orang Tua Asuh Pendidikan',
       'yayasan': 'Yayasan',
     };
     return labels[sumber] || sumber;
@@ -239,7 +245,7 @@ const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santri
               <SelectContent>
                 <SelectItem value="all">Semua Sumber</SelectItem>
                 <SelectItem value="orang_tua">Orang Tua</SelectItem>
-                <SelectItem value="donatur">Donatur</SelectItem>
+                <SelectItem value="donatur">Orang Tua Asuh Pendidikan</SelectItem>
                 <SelectItem value="yayasan">Yayasan</SelectItem>
               </SelectContent>
             </Select>
@@ -414,7 +420,7 @@ const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santri
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="orang_tua">Orang Tua / Wali</SelectItem>
-                    <SelectItem value="donatur">Donatur</SelectItem>
+                    <SelectItem value="donatur">Orang Tua Asuh Pendidikan</SelectItem>
                     <SelectItem value="yayasan">Yayasan</SelectItem>
                   </SelectContent>
                 </Select>
@@ -427,13 +433,13 @@ const RiwayatPembayaran: React.FC<RiwayatPembayaranProps> = ({ tagihanId, santri
             </div>
             {editForm.sumber_pembayaran === 'donatur' && (
               <div className="space-y-2">
-                <Label>Pilih Donatur *</Label>
+                <Label>Pilih Orang Tua Asuh Pendidikan *</Label>
                 <Select
                   value={editForm.donatur_id}
                   onValueChange={(value) => setEditForm({ ...editForm, donatur_id: value })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih donatur" />
+                    <SelectValue placeholder="Pilih orang tua asuh pendidikan" />
                   </SelectTrigger>
                   <SelectContent>
                     {donaturList.map(donatur => (

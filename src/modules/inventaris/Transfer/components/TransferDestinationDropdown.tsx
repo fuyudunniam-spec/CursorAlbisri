@@ -10,12 +10,6 @@ interface TransferDestinationDropdownProps {
 
 const DESTINATION_OPTIONS = [
   {
-    value: TransferDestination.KOPERASI,
-    label: 'Koperasi',
-    icon: Store,
-    description: 'Transfer ke koperasi (memerlukan approval)'
-  },
-  {
     value: TransferDestination.DISTRIBUSI,
     label: 'Distribusi Bantuan',
     icon: Package,

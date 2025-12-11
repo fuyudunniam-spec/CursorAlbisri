@@ -105,16 +105,21 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
     return raw?.trim() || 'Dokumen';
   };
 
-  const getDokumenRequirements = (statusSosial: string, kategori: string, isBantuan: boolean) => {
+  const getDokumenRequirements = async (statusSosial: string, kategori: string, isBantuan: boolean) => {
     try {
-      // Gunakan ProfileHelper untuk mendapatkan dokumen yang diperlukan
-      const requiredDocuments = ProfileHelper.getRequiredDocuments(kategori, statusSosial);
-      
-      console.log('📋 ProfileHelper.getRequiredDocuments result:', {
+      // Gunakan DocumentService untuk mengambil dari database dengan filter status sosial
+      const requiredDocuments = await DocumentService.getDocumentRequirements(
         kategori,
         statusSosial,
-        requiredDocuments,
         isBantuan
+      );
+      
+      console.log('📋 DocumentService.getDocumentRequirements result:', {
+        kategori,
+        statusSosial,
+        isBantuan,
+        requiredDocuments,
+        count: requiredDocuments?.length || 0
       });
       
       // Jika tidak ada dokumen yang diperlukan, berikan default minimal
@@ -122,8 +127,8 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         console.log('⚠️ No required documents found, using default');
         return {
           minimal: [
-            { jenis_dokumen: 'KTP/KK', label: 'KTP/KK', required: true },
-            { jenis_dokumen: 'Foto', label: 'Foto Santri', required: true }
+            { jenis_dokumen: 'Pas Foto', label: 'Pas Foto', required: true },
+            { jenis_dokumen: 'Kartu Keluarga', label: 'Kartu Keluarga', required: true }
           ],
           khusus: [],
           pelengkap: []
@@ -139,15 +144,15 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
           return {
             jenis_dokumen: mappedJenis,
             label: mappedJenis,
-            required: doc.required,
-            description: doc.description
+            required: doc.is_required || false,
+            description: doc.deskripsi
           };
         })
         .filter(Boolean) as Array<{ jenis_dokumen: string; label: string; required: boolean; description?: string }>;
 
-    // Pisahkan dokumen berdasarkan required dan optional
-    const minimal = dokumenList.filter(d => d.required);
-    const pelengkap = dokumenList.filter(d => !d.required);
+      // Pisahkan dokumen berdasarkan required dan optional
+      const minimal = dokumenList.filter(d => d.required);
+      const pelengkap = dokumenList.filter(d => !d.required);
 
       return {
         minimal,
@@ -159,8 +164,8 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
       // Return default minimal requirements
       return {
         minimal: [
-          { jenis_dokumen: 'KTP/KK', label: 'KTP/KK', required: true },
-          { jenis_dokumen: 'Foto', label: 'Foto Santri', required: true }
+          { jenis_dokumen: 'Pas Foto', label: 'Pas Foto', required: true },
+          { jenis_dokumen: 'Kartu Keluarga', label: 'Kartu Keluarga', required: true }
         ],
         khusus: [],
         pelengkap: []
@@ -182,8 +187,9 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         .eq('santri_id', santriId)
         .in('jenis_dokumen', ['Surat Permohonan Bantuan', 'SKTM (Dhuafa)', 'KTP/KK']);
 
-      const requirements = getDokumenRequirements(
-        santriData?.status_sosial || 'Dhuafa',
+      // Get requirements from database with status sosial filter
+      const requirements = await getDokumenRequirements(
+        santriData?.status_sosial || 'Lengkap',
         santriData?.kategori || 'Reguler',
         isBantuanRecipient
       );
@@ -203,7 +209,10 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
       ];
 
       const mergedDocs = allDocs.map(req => {
-        const uploaded = data?.find(d => d.jenis_dokumen === req.jenis_dokumen);
+        const uploaded = data?.find(d => {
+          const uploadedJenis = normalizeJenisDokumen(d.jenis_dokumen);
+          return uploadedJenis === req.jenis_dokumen;
+        });
         console.log('🔍 Matching dokumen:', {
           required: req.jenis_dokumen,
           uploaded: uploaded?.jenis_dokumen,
@@ -464,55 +473,26 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
     setPreviewFile(doc);
   };
 
-  const requirements = getDokumenRequirements(
-    santriData?.status_sosial || 'Dhuafa',
-    santriData?.kategori || 'Reguler',
-    isBantuanRecipient
-  );
+  // Requirements akan di-load di loadDokumen, tidak perlu di sini
+  // Karena sekarang async dan di-load di useEffect
 
-  // Debug logging
-  console.log('🔍 DokumenSantriTab Debug:', {
-    santriId,
-    santriData,
-    mode,
-    isBantuanRecipient,
-    requirements,
-    minimalCount: requirements.minimal?.length || 0,
-    khususCount: requirements.khusus?.length || 0,
-    pelengkapCount: requirements.pelengkap?.length || 0
-  });
-
-  // Add null check for requirements
-  if (!requirements) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <div className="text-gray-500">Loading dokumen requirements...</div>
-        </div>
-      </div>
-    );
-  }
-
-  const minimalUploaded = dokumenList
-    .filter(d => requirements.minimal?.some(m => m.jenis_dokumen === d.jenis_dokumen))
-    .filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+  // Calculate requirements from dokumenList
+  const minimalDocs = dokumenList.filter(d => d.required);
+  const khususDocs = dokumenList.filter(d => d.jenis_dokumen?.includes('Khusus') || false); // Adjust based on your logic
+  const pelengkapDocs = dokumenList.filter(d => !d.required);
   
-  const khususUploaded = dokumenList
-    .filter(d => requirements.khusus?.some(k => k.jenis_dokumen === d.jenis_dokumen))
-    .filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
-
-  const pelengkapUploaded = dokumenList
-    .filter(d => requirements.pelengkap?.some(p => p.jenis_dokumen === d.jenis_dokumen))
-    .filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
-
-  const minimalProgress = requirements.minimal?.length > 0 
-    ? (minimalUploaded / requirements.minimal.length) * 100 
+  const minimalUploaded = minimalDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+  const khususUploaded = khususDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+  const pelengkapUploaded = pelengkapDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+  
+  const minimalProgress = minimalDocs.length > 0 
+    ? (minimalUploaded / minimalDocs.length) * 100 
     : 100;
-  const khususProgress = requirements.khusus?.length > 0 
-    ? (khususUploaded / requirements.khusus.length) * 100 
+  const khususProgress = khususDocs.length > 0 
+    ? (khususUploaded / khususDocs.length) * 100 
     : 100;
-  const pelengkapProgress = requirements.pelengkap?.length > 0 
-    ? (pelengkapUploaded / requirements.pelengkap.length) * 100 
+  const pelengkapProgress = pelengkapDocs.length > 0 
+    ? (pelengkapUploaded / pelengkapDocs.length) * 100 
     : 100;
 
   const isMinimalComplete = minimalProgress === 100;
@@ -555,7 +535,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
             </CardTitle>
             {isBantuanRecipient && (
               <Badge variant={isMinimalComplete ? 'default' : 'secondary'}>
-                {minimalUploaded + pelengkapUploaded}/{requirements.minimal.length + requirements.pelengkap.length}
+                {minimalUploaded + pelengkapUploaded}/{minimalDocs.length + pelengkapDocs.length}
               </Badge>
             )}
           </div>
@@ -563,16 +543,16 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
             <div className="space-y-2 mt-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Progress Total</span>
-                <span className="font-medium">{Math.round(((minimalUploaded + pelengkapUploaded) / (requirements.minimal.length + requirements.pelengkap.length)) * 100)}%</span>
+                <span className="font-medium">{Math.round(((minimalUploaded + pelengkapUploaded) / (minimalDocs.length + pelengkapDocs.length)) * 100)}%</span>
               </div>
-              <Progress value={((minimalUploaded + pelengkapUploaded) / (requirements.minimal.length + requirements.pelengkap.length)) * 100} className="h-2" />
+              <Progress value={((minimalUploaded + pelengkapUploaded) / (minimalDocs.length + pelengkapDocs.length)) * 100} className="h-2" />
             </div>
           )}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Gabungkan dokumen wajib dan opsional */}
-            {[...(requirements.minimal || []), ...(requirements.pelengkap || [])].map((dok, idx) => {
+            {[...minimalDocs, ...pelengkapDocs].map((dok, idx) => {
               const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
               const isUploading = uploadingFiles[dok.jenis_dokumen];
 
@@ -662,7 +642,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
       </Card>
 
       {/* Section 2: Dokumen Khusus (hanya untuk bantuan yayasan) */}
-      {isBantuanRecipient && requirements.khusus.length > 0 && (
+      {isBantuanRecipient && khususDocs.length > 0 && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -671,7 +651,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
                 📋 Dokumen Khusus ({santriData.status_sosial})
               </CardTitle>
               <Badge variant={isKhususComplete ? 'default' : 'secondary'}>
-                {khususUploaded}/{requirements.khusus.length}
+                {khususUploaded}/{khususDocs.length}
               </Badge>
             </div>
             <div className="space-y-2 mt-3">
@@ -683,7 +663,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {requirements.khusus?.map((dok, idx) => {
+            {khususDocs.map((dok, idx) => {
               const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
               
               return (
@@ -772,7 +752,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
                   ⚠️ Mohon Lengkapi Dokumen Wajib
                 </div>
                 <div className="text-sm text-amber-700 mt-1">
-                  Masih kurang {requirements.minimal.length - minimalUploaded} dokumen wajib.
+                  Masih kurang {minimalDocs.length - minimalUploaded} dokumen wajib.
                   Silakan upload untuk melanjutkan proses bantuan yayasan.
                 </div>
               </AlertDescription>

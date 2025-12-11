@@ -353,11 +353,9 @@ export function TransferFormDialog({
                 onChange={setTujuan}
                 disabled={isSubmitting}
               />
-              {tujuan === TransferDestination.KOPERASI && (
-                <p className="text-xs text-muted-foreground">
-                  ⚠️ Transfer ke koperasi memerlukan approval dari admin koperasi
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                💡 Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+              </p>
             </div>
 
             {/* Notes */}

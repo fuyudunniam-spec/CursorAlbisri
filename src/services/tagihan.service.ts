@@ -280,6 +280,7 @@ export class TagihanService {
    */
   static async getAllPayments(filters?: {
     santri_id?: string;
+    santri_ids?: string[];
     tanggal_mulai?: string;
     tanggal_selesai?: string;
     sumber_pembayaran?: string;
@@ -296,7 +297,10 @@ export class TagihanService {
         `)
         .order('tanggal_bayar', { ascending: false });
 
-      if (filters?.santri_id) {
+      // Support multiple santri IDs
+      if (filters?.santri_ids && filters.santri_ids.length > 0) {
+        query = query.in('santri_id', filters.santri_ids);
+      } else if (filters?.santri_id) {
         query = query.eq('santri_id', filters.santri_id);
       }
 

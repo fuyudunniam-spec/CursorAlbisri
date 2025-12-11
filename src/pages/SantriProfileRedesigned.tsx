@@ -30,7 +30,9 @@ import {
   Award,
   HeartHandshake,
   Building2,
-  Clock
+  Clock,
+  Save,
+  X
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDate, formatRupiah } from "@/utils/inventaris.utils";
@@ -40,10 +42,13 @@ import { toast } from 'sonner';
 import { TagihanService, TagihanSantri, PembayaranSantri } from '@/services/tagihan.service';
 import { SetoranHarianService } from '@/services/setoranHarian.service';
 import { cn } from "@/lib/utils";
-import DokumenSantriTab from "@/components/DokumenSantriTab";
 import { Progress } from "@/components/ui/progress";
+import PersonalStep from "@/components/forms/PersonalStep";
+import WaliStep from "@/components/forms/WaliStep";
+import DokumenSantriTab from "@/components/DokumenSantriTab";
+import { SantriData, WaliData } from "@/types/santri.types";
 
-interface SantriData {
+interface SantriDataLocal {
   id: string;
   id_santri?: string;
   nama_lengkap: string;
@@ -59,6 +64,7 @@ interface SantriData {
   no_whatsapp?: string;
   alamat?: string;
   nisn?: string;
+  nik?: string;
 }
 
 interface ProgramAktif {
@@ -104,7 +110,7 @@ const SantriProfileRedesigned = () => {
 
   const [activeTab, setActiveTab] = useState("ringkasan");
   const [loading, setLoading] = useState(true);
-  const [santri, setSantri] = useState<SantriData | null>(null);
+  const [santri, setSantri] = useState<SantriDataLocal | null>(null);
   const [waliData, setWaliData] = useState<any[]>([]);
   const [programAktif, setProgramAktif] = useState<ProgramAktif[]>([]);
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary>({});
@@ -120,6 +126,11 @@ const SantriProfileRedesigned = () => {
     hadir: number;
     total: number;
   }>({ persentase: 0, hadir: 0, total: 0 });
+
+  // Form state for editing
+  const [isSaving, setIsSaving] = useState(false);
+  const [formSantriData, setFormSantriData] = useState<Partial<SantriData>>({});
+  const [formWaliData, setFormWaliData] = useState<WaliData[]>([]);
 
   // Load all data
   useEffect(() => {
@@ -137,6 +148,15 @@ const SantriProfileRedesigned = () => {
 
         if (santriError) throw santriError;
         setSantri(santriData);
+        
+        // Initialize form data with santri data (ensure all required fields have defaults)
+        setFormSantriData({
+          ...santriData,
+          jenis_kelamin: santriData?.jenis_kelamin || 'Laki-laki',
+          agama: santriData?.agama || 'Islam',
+          status_santri: santriData?.status_santri || 'Aktif',
+          status_sosial: (santriData?.status_sosial as any) || 'Lengkap',
+        } as Partial<SantriData>);
 
         // Load wali data
         const { data: wali, error: waliError } = await supabase
@@ -145,7 +165,22 @@ const SantriProfileRedesigned = () => {
           .eq('santri_id', santriId)
           .order('is_utama', { ascending: false });
 
-        if (!waliError) setWaliData(wali || []);
+        if (!waliError) {
+          const waliList = wali || [];
+          setWaliData(waliList);
+          // Initialize form wali data - ensure at least one wali utama exists
+          if (waliList.length === 0) {
+            setFormWaliData([{
+              nama_lengkap: '',
+              hubungan_keluarga: 'Ayah',
+              no_whatsapp: '',
+              alamat: '',
+              is_utama: true
+            }]);
+          } else {
+            setFormWaliData(waliList);
+          }
+        }
 
         // Load program aktif (kelas_anggota)
         const { data: kelasAnggota, error: kelasError } = await supabase
@@ -315,7 +350,7 @@ const SantriProfileRedesigned = () => {
             totalFormal += Number(t.total_tagihan_formal);
             dibayarFormal += Number(t.total_bayar_formal || 0);
           }
-          // Check for yayasan payments
+          // Check for yayasan payments from pembayaran_santri
           try {
             const payments = await TagihanService.getPaymentHistory(t.id);
             payments.forEach((p: PembayaranSantri) => {
@@ -326,6 +361,40 @@ const SantriProfileRedesigned = () => {
           } catch (err) {
             console.error('Error loading payment history for tagihan:', t.id, err);
           }
+        }
+
+        // Add bantuan langsung dari alokasi_pengeluaran_santri
+        try {
+          const { data: alokasiLangsung } = await supabase
+            .from('alokasi_pengeluaran_santri')
+            .select('nominal_alokasi')
+            .eq('santri_id', id);
+          
+          if (alokasiLangsung) {
+            const totalLangsung = alokasiLangsung.reduce(
+              (sum, item) => sum + (item.nominal_alokasi || 0), 0
+            );
+            totalBantuan += totalLangsung;
+          }
+        } catch (err) {
+          console.error('Error loading alokasi langsung:', err);
+        }
+
+        // Add bantuan overhead dari alokasi_overhead_per_santri
+        try {
+          const { data: alokasiOverhead } = await supabase
+            .from('alokasi_overhead_per_santri')
+            .select('spp_pendidikan, asrama_kebutuhan')
+            .eq('santri_id', id);
+          
+          if (alokasiOverhead) {
+            const totalOverhead = alokasiOverhead.reduce(
+              (sum, item) => sum + (item.spp_pendidikan || 0) + (item.asrama_kebutuhan || 0), 0
+            );
+            totalBantuan += totalOverhead;
+          }
+        } catch (err) {
+          console.error('Error loading alokasi overhead:', err);
         }
 
         setFinancialSummary({
@@ -360,12 +429,36 @@ const SantriProfileRedesigned = () => {
         try {
           const payments = await TagihanService.getPaymentHistory(t.id);
           payments.forEach((p: PembayaranSantri) => {
-            const jenis = Array.isArray(t.komponen_tagihan) && t.komponen_tagihan.length > 0
-              ? t.komponen_tagihan[0].nama 
-              : 'SPP';
+            // Determine jenis pembayaran based on tagihan type and alokasi
+            let jenis = 'SPP';
+            if (isBinaanMukim) {
+              // For Binaan Mukim, check alokasi_ke
+              if (p.alokasi_ke === 'pesantren') {
+                jenis = 'SPP Pesantren';
+              } else if (p.alokasi_ke === 'formal') {
+                jenis = 'Pendidikan Formal';
+              } else if (p.sumber_pembayaran === 'yayasan') {
+                jenis = 'Bantuan Yayasan';
+              } else {
+                // Fallback to komponen tagihan
+                jenis = Array.isArray(t.komponen_tagihan) && t.komponen_tagihan.length > 0
+                  ? t.komponen_tagihan[0].nama 
+                  : 'SPP';
+              }
+            } else {
+              // For other categories, use komponen tagihan or default
+              if (p.sumber_pembayaran === 'yayasan') {
+                jenis = 'Bantuan Yayasan';
+              } else {
+                jenis = Array.isArray(t.komponen_tagihan) && t.komponen_tagihan.length > 0
+                  ? t.komponen_tagihan[0].nama 
+                  : 'SPP';
+              }
+            }
+            
             const sumberLabel = 
               p.sumber_pembayaran === 'orang_tua' ? 'Orang Tua' :
-              p.sumber_pembayaran === 'donatur' ? 'Donatur' :
+              p.sumber_pembayaran === 'donatur' ? 'Orang Tua Asuh Pendidikan' :
               p.sumber_pembayaran === 'yayasan' ? 'Yayasan' : 'Lainnya';
 
             allPayments.push({
@@ -410,6 +503,121 @@ const SantriProfileRedesigned = () => {
   // Get wali utama
   const waliUtama = waliData.find(w => w.is_utama) || waliData[0];
 
+  // Form validation
+  const isFormValid = () => {
+    const basicValid = (
+      formSantriData.kategori &&
+      formSantriData.nama_lengkap?.trim() &&
+      formSantriData.tanggal_masuk &&
+      formSantriData.tempat_lahir?.trim() &&
+      formSantriData.tanggal_lahir &&
+      formSantriData.no_whatsapp?.trim() &&
+      formSantriData.alamat?.trim() &&
+      formSantriData.nik?.trim() &&
+      formWaliData.some(w => w.is_utama && w.nama_lengkap.trim())
+    );
+
+    // Binaan validation
+    if (formSantriData.kategori?.includes('Binaan')) {
+      const binaanValid = formSantriData.status_sosial !== 'Lengkap';
+      const waliValid = formWaliData.every(w => w.pekerjaan && w.penghasilan_bulanan !== undefined);
+      
+      if (formSantriData.kategori === 'Binaan Mukim') {
+        const mukimValid = 
+          formSantriData.anak_ke !== undefined &&
+          formSantriData.jumlah_saudara !== undefined &&
+          formSantriData.hobi?.trim() &&
+          formSantriData.cita_cita?.trim() &&
+          formWaliData.length >= 2;
+        
+        return basicValid && binaanValid && waliValid && mukimValid;
+      }
+      
+      return basicValid && binaanValid && waliValid;
+    }
+
+    return basicValid;
+  };
+
+  // Handle save form
+  const handleSaveForm = async () => {
+    if (!isFormValid()) {
+      toast.error('Lengkapi semua data yang wajib diisi');
+      return;
+    }
+
+    if (!santriId) {
+      toast.error('ID Santri tidak ditemukan');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Prepare santri payload
+      const santriPayload = {
+        ...formSantriData,
+        agama: formSantriData.agama || 'Islam',
+      };
+
+      // Update santri
+      const { error: santriError } = await supabase
+        .from('santri')
+        .update(santriPayload)
+        .eq('id', santriId);
+
+      if (santriError) throw santriError;
+
+      // Update wali - delete existing and insert new
+      await supabase.from('santri_wali').delete().eq('santri_id', santriId);
+      
+      const waliPayload = formWaliData.map(wali => {
+        const { id, ...waliWithoutId } = wali;
+        return { ...waliWithoutId, santri_id: santriId };
+      });
+      
+      const { error: waliError } = await supabase
+        .from('santri_wali')
+        .insert(waliPayload);
+      
+      if (waliError) throw waliError;
+
+      // Update local state
+      setSantri({ ...santri, ...santriPayload } as SantriDataLocal);
+      setWaliData(formWaliData);
+
+      toast.success('Data santri berhasil diperbarui');
+      
+      // Reload data to ensure consistency
+      const { data: updatedSantri } = await supabase
+        .from('santri')
+        .select('*')
+        .eq('id', santriId)
+        .single();
+      
+      if (updatedSantri) {
+        setSantri(updatedSantri);
+        setFormSantriData(updatedSantri);
+      }
+
+      const { data: updatedWali } = await supabase
+        .from('santri_wali')
+        .select('*')
+        .eq('santri_id', santriId)
+        .order('is_utama', { ascending: false });
+      
+      if (updatedWali) {
+        setWaliData(updatedWali);
+        setFormWaliData(updatedWali);
+      }
+
+    } catch (error: any) {
+      console.error('Error saving form:', error);
+      toast.error('Gagal menyimpan data: ' + (error.message || 'Terjadi kesalahan'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (!santriId) {
     return (
       <div className="p-4 lg:p-6">
@@ -442,7 +650,7 @@ const SantriProfileRedesigned = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Sticky Header */}
-      <div className="sticky top-0 z-50 bg-background border-b shadow-sm">
+      <div className="sticky top-0 z-40 lg:z-50 bg-background border-b shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4 flex-wrap">
             {/* Avatar */}
@@ -508,7 +716,20 @@ const SantriProfileRedesigned = () => {
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Kembali</span>
               </Button>
-              <Button variant="outline" size="sm" onClick={() => window.location.href = `/santri?edit=${santriId}`}>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => {
+                  setActiveTab('informasi');
+                  // Scroll to top of tab content
+                  setTimeout(() => {
+                    const tabContent = document.querySelector('[data-value="informasi"]');
+                    if (tabContent) {
+                      tabContent.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 100);
+                }}
+              >
                 <Edit className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Edit</span>
               </Button>
@@ -785,129 +1006,73 @@ const SantriProfileRedesigned = () => {
           </TabsContent>
 
           {/* Tab Informasi Pribadi */}
-          <TabsContent value="informasi" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Personal Information */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="w-5 h-5" />
-                    Informasi Pribadi
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Nama Lengkap</label>
-                      <p className="text-sm font-medium">{santri?.nama_lengkap || '-'}</p>
+          <TabsContent value="informasi" className="space-y-6" data-value="informasi">
+            <div className="space-y-6">
+              {/* Personal Information Form */}
+              <PersonalStep
+                santriData={formSantriData as SantriData}
+                onChange={(data) => setFormSantriData(prev => ({ ...prev, ...data }))}
+                isBinaan={santri?.kategori?.includes('Binaan') || false}
+                isMukim={santri?.kategori?.includes('Mukim') || false}
+              />
+
+              {/* Wali Data Form */}
+              <WaliStep
+                waliData={formWaliData}
+                onChange={setFormWaliData}
+                isBinaan={santri?.kategori?.includes('Binaan') || false}
+                isMukim={santri?.kategori?.includes('Mukim') || false}
+              />
+
+              {/* Save Button */}
+              <Card className="bg-slate-50 border-slate-200">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      Pastikan semua data telah diisi dengan benar sebelum menyimpan
                     </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">ID Santri</label>
-                      <p className="text-sm">{santri?.id_santri || '-'}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Tempat, Tanggal Lahir</label>
-                      <p className="text-sm">
-                        {santri?.tempat_lahir || '-'}, {santri?.tanggal_lahir ? formatDate(santri.tanggal_lahir) : '-'}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Jenis Kelamin</label>
-                      <p className="text-sm">{santri?.jenis_kelamin || '-'}</p>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Alamat</label>
-                    <p className="text-sm">{santri?.alamat || '-'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Nomor WhatsApp</label>
-                    <p className="text-sm flex items-center gap-2">
-                      <Phone className="w-4 h-4" />
-                      {santri?.no_whatsapp || '-'}
-                    </p>
+                    <Button 
+                      onClick={handleSaveForm}
+                      disabled={isSaving}
+                      size="lg"
+                      className="min-w-[150px]"
+                    >
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Menyimpan...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-2" />
+                          Simpan Perubahan
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Administrative Information */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Calendar className="w-5 h-5" />
-                    Data Administrasi
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Kategori Santri</label>
-                      <p className="text-sm">{santri?.kategori || '-'}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Angkatan</label>
-                      <p className="text-sm">{santri?.angkatan || '-'}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Tanggal Masuk</label>
-                      <p className="text-sm">{santri?.tanggal_masuk ? formatDate(santri.tanggal_masuk) : '-'}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Status Santri</label>
-                      <Badge className={getStatusColor(santri?.status_santri)}>
-                        {santri?.status_santri || '-'}
-                      </Badge>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Tipe Pembayaran</label>
-                      <p className="text-sm">{santri?.tipe_pembayaran || '-'}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Wali Information */}
-              {waliData.length > 0 && (
-                <Card className="lg:col-span-2">
+              {/* Dokumen Upload & Verifikasi Section */}
+              {santriId && santri && (
+                <Card className="mt-8">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Users className="w-5 h-5" />
-                      Data Wali
+                      <FileText className="w-5 h-5" />
+                      Dokumen & Verifikasi
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {waliData.map((wali, index) => (
-                        <div key={index} className="p-4 border rounded-lg">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-medium">
-                              {wali.is_utama ? 'Wali Utama' : `Wali ${index + 1}`}
-                            </h4>
-                            {wali.is_utama && (
-                              <Badge variant="default" className="text-xs">Utama</Badge>
-                            )}
-                          </div>
-                          <div className="space-y-2 text-sm">
-                            <div>
-                              <span className="font-medium">Nama:</span> {wali.nama_lengkap}
-                            </div>
-                            <div>
-                              <span className="font-medium">Hubungan:</span> {wali.hubungan_keluarga}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Phone className="w-3 h-3" />
-                              <span>{wali.no_whatsapp}</span>
-                            </div>
-                            {wali.alamat && (
-                              <div className="flex items-start gap-2">
-                                <MapPin className="w-3 h-3 mt-0.5" />
-                                <span className="text-xs">{wali.alamat}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <DokumenSantriTab
+                      santriId={santriId}
+                      santriData={{
+                        status_sosial: (santri.status_sosial as any) || 'Lengkap',
+                        nama_lengkap: santri.nama_lengkap,
+                        kategori: santri.kategori
+                      }}
+                      isBantuanRecipient={santri.kategori?.includes('Binaan') || santri.tipe_pembayaran === 'Bantuan Yayasan'}
+                      mode="edit"
+                    />
                   </CardContent>
                 </Card>
               )}
@@ -967,7 +1132,7 @@ const SantriProfileRedesigned = () => {
           {/* Tab Laporan Keuangan */}
           <TabsContent value="keuangan" className="space-y-6">
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {santri?.kategori?.includes('Binaan Mukim') ? (
                 <>
                   <Card>
@@ -1003,13 +1168,15 @@ const SantriProfileRedesigned = () => {
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                       <CardTitle className="text-sm font-medium">Total Bantuan Yayasan</CardTitle>
-                      <HeartHandshake className="h-4 w-4 text-green-600" />
+                      <HeartHandshake className="h-4 w-4 text-blue-600" />
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-green-600">
+                      <div className="text-2xl font-bold text-blue-600">
                         {formatRupiah(financialSummary.total_bantuan_yayasan || 0)}
                       </div>
-                      <p className="text-xs text-muted-foreground">Bantuan yang diterima</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Akumulasi biaya pendidikan dan bantuan lain yang ditanggung yayasan untuk santri ini.
+                      </p>
                     </CardContent>
                   </Card>
                 </>
@@ -1089,27 +1256,35 @@ const SantriProfileRedesigned = () => {
                         {paymentHistory.map((payment, index) => (
                           <TableRow 
                             key={index}
-                            className={payment.sumber === 'Donatur' ? 'bg-green-50' : ''}
+                            className={
+                              payment.sumber === 'Orang Tua Asuh Pendidikan' 
+                                ? 'bg-green-50/50 hover:bg-green-50' 
+                                : payment.sumber === 'Yayasan'
+                                ? 'bg-blue-50/50 hover:bg-blue-50'
+                                : 'hover:bg-muted/50'
+                            }
                           >
-                            <TableCell>{formatDate(payment.tanggal)}</TableCell>
-                            <TableCell>{payment.periode}</TableCell>
-                            <TableCell>{payment.jenis}</TableCell>
-                            <TableCell className="font-medium">{formatRupiah(payment.nominal)}</TableCell>
+                            <TableCell className="font-medium">{formatDate(payment.tanggal)}</TableCell>
+                            <TableCell className="text-sm">{payment.periode || '-'}</TableCell>
+                            <TableCell className="font-medium">{payment.jenis}</TableCell>
+                            <TableCell className="font-semibold">{formatRupiah(payment.nominal)}</TableCell>
                             <TableCell>
                               <Badge 
                                 className={
-                                  payment.sumber === 'Donatur' 
+                                  payment.sumber === 'Orang Tua Asuh Pendidikan' 
                                     ? 'bg-green-100 text-green-800 border-green-200' 
-                                    : payment.sumber === 'Orang Tua'
+                                    : payment.sumber === 'Yayasan'
                                     ? 'bg-blue-100 text-blue-800 border-blue-200'
-                                    : 'bg-gray-100 text-gray-800'
+                                    : 'bg-gray-100 text-gray-800 border-gray-200'
                                 }
                               >
                                 {payment.sumber}
-                                {payment.donatur_name && ` (${payment.donatur_name})`}
+                                {payment.donatur_name && (
+                                  <span className="ml-1 text-xs font-normal">({payment.donatur_name})</span>
+                                )}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
+                            <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
                               {payment.keterangan || '-'}
                             </TableCell>
                           </TableRow>
@@ -1122,33 +1297,41 @@ const SantriProfileRedesigned = () => {
                       {paymentHistory.map((payment, index) => (
                         <Card 
                           key={index}
-                          className={payment.sumber === 'Donatur' ? 'border-green-200 bg-green-50' : ''}
+                          className={
+                            payment.sumber === 'Orang Tua Asuh Pendidikan' 
+                              ? 'border-green-200 bg-green-50/50' 
+                              : payment.sumber === 'Yayasan'
+                              ? 'border-blue-200 bg-blue-50/50'
+                              : 'border-gray-200'
+                          }
                         >
                           <CardContent className="p-4">
                             <div className="flex items-start justify-between mb-2">
-                              <div>
-                                <p className="font-medium">{payment.jenis}</p>
-                                <p className="text-xs text-muted-foreground">{payment.periode}</p>
+                              <div className="flex-1">
+                                <p className="font-medium text-sm">{payment.jenis}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{payment.periode}</p>
                               </div>
                               <Badge 
                                 className={
-                                  payment.sumber === 'Donatur' 
-                                    ? 'bg-green-100 text-green-800' 
-                                    : payment.sumber === 'Orang Tua'
-                                    ? 'bg-blue-100 text-blue-800'
-                                    : 'bg-gray-100 text-gray-800'
+                                  payment.sumber === 'Orang Tua Asuh Pendidikan' 
+                                    ? 'bg-green-100 text-green-800 border-green-200 text-xs' 
+                                    : payment.sumber === 'Yayasan'
+                                    ? 'bg-blue-100 text-blue-800 border-blue-200 text-xs'
+                                    : 'bg-gray-100 text-gray-800 border-gray-200 text-xs'
                                 }
                               >
                                 {payment.sumber}
                               </Badge>
                             </div>
                             <div className="text-lg font-bold mb-2">{formatRupiah(payment.nominal)}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatDate(payment.tanggal)}
-                              {payment.donatur_name && ` • ${payment.donatur_name}`}
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>{formatDate(payment.tanggal)}</span>
+                              {payment.donatur_name && (
+                                <span className="text-green-700 font-medium">{payment.donatur_name}</span>
+                              )}
                             </div>
                             {payment.keterangan && (
-                              <p className="text-xs text-muted-foreground mt-2">{payment.keterangan}</p>
+                              <p className="text-xs text-muted-foreground mt-2 pt-2 border-t">{payment.keterangan}</p>
                             )}
                           </CardContent>
                         </Card>

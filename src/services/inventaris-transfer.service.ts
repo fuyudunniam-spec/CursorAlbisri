@@ -102,7 +102,50 @@ export async function createTransfer(
     );
   }
 
-  // Reduce stock immediately (for all destinations)
+  // For koperasi transfers: Create pengajuan_item_yayasan (NO stock reduction)
+  // Stock will only be reduced when admin koperasi approves the pengajuan
+  if (data.tujuan === 'koperasi') {
+    const nilaiPerolehan = item.harga_perolehan || 0;
+    const usulanHpp = nilaiPerolehan; // Default usulan HPP = nilai perolehan
+
+    // Create pengajuan_item_yayasan
+    // Note: catatan field might not exist in table, so we don't include it
+    const pengajuanData: any = {
+      inventaris_item_id: data.item_id,
+      nama: item.nama_barang,
+      qty: data.jumlah,
+      nilai_perolehan: nilaiPerolehan,
+      usulan_hpp: usulanHpp,
+      status: 'pending_koperasi',
+      created_by: user.id,
+    };
+
+    const { data: pengajuan, error: pengajuanError } = await supabase
+      .from('pengajuan_item_yayasan')
+      .insert(pengajuanData)
+      .select('*')
+      .single();
+
+    if (pengajuanError) {
+      throw new TransferValidationError('Gagal membuat pengajuan: ' + pengajuanError.message);
+    }
+
+    // Return a transfer-like object for consistency
+    return {
+      id: pengajuan.id,
+      item_id: data.item_id,
+      item_name: item.nama_barang,
+      jumlah: data.jumlah,
+      tujuan: 'koperasi' as TransferDestination,
+      status: 'pending' as TransferStatus,
+      created_by: user.id,
+      created_at: pengajuan.created_at,
+      hpp_yayasan: nilaiPerolehan,
+      catatan: data.catatan || null,
+    } as Transfer;
+  }
+
+  // For non-koperasi destinations: Reduce stock immediately and create transfer_inventaris
   const newStock = availableStock - data.jumlah;
   const { error: updateError } = await supabase
     .from('inventaris')
@@ -113,15 +156,12 @@ export async function createTransfer(
     throw new TransferStockError('Gagal mengurangi stok: ' + updateError.message);
   }
 
-  // Determine status based on destination
-  const status = data.tujuan === 'koperasi' ? 'pending' : 'completed';
-
   // Create transfer record
   const transferData = {
     item_id: data.item_id,
     jumlah: data.jumlah,
     tujuan: data.tujuan,
-    status,
+    status: 'completed' as TransferStatus,
     created_by: user.id,
     hpp_yayasan: item.harga_perolehan || null,
     catatan: data.catatan || null

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Plus } from "lucide-react";
 import { koperasiService } from "@/services/koperasi.service";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,12 +27,17 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
   const [newKategori, setNewKategori] = useState("");
   const [selectedKategori, setSelectedKategori] = useState("");
 
-  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<KoperasiProdukInsert>();
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<KoperasiProdukInsert>({
+    defaultValues: {
+      owner_type: 'koperasi',
+    }
+  });
 
   const hargaBeli = watch('harga_beli');
   const hargaJualEcer = watch('harga_jual_ecer');
   const hargaJualGrosir = watch('harga_jual_grosir');
   const namaProduk = watch('nama_produk');
+  const ownerType = watch('owner_type');
 
   // Fetch kategori list
   const { data: kategoriList = [] } = useQuery({
@@ -47,15 +53,21 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
     enabled: open,
   });
 
-  // Auto-generate kode produk koperasi dengan format KOP-0001, KOP-0002, dst.
+  // Track previous owner_type to detect changes
+  const prevOwnerTypeRef = useRef<string | undefined>(produk?.owner_type);
+
+  // Auto-generate kode produk berdasarkan owner_type
+  // KOP-0001 untuk koperasi, YYS-0001 untuk yayasan
+  // Generate saat create mode atau saat owner_type berubah dari nilai sebelumnya
   useEffect(() => {
-    if (!isEdit && open) {
+    if (open && ownerType) {
       const generateKode = async () => {
         try {
-          const prefix = 'KOP-';
+          const prefix = ownerType === 'yayasan' ? 'YYS-' : 'KOP-';
           const { data, error } = await supabase
             .from('kop_barang')
-            .select('kode_barang')
+            .select('kode_barang, owner_type')
+            .eq('owner_type', ownerType)
             .like('kode_barang', `${prefix}%`)
             .order('kode_barang', { ascending: false })
             .limit(1);
@@ -64,52 +76,99 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
 
           let nextNum = 1;
           if (data && data.length > 0 && data[0].kode_barang) {
-            const match = data[0].kode_barang.match(/^KOP-(\d+)$/);
+            const match = data[0].kode_barang.match(new RegExp(`^${prefix}(\\d+)$`));
             if (match) {
               nextNum = parseInt(match[1], 10) + 1;
             }
           }
 
           const generatedKode = `${prefix}${nextNum.toString().padStart(4, '0')}`;
-          setValue('kode_produk', generatedKode);
+          setValue('kode_produk', generatedKode, { shouldValidate: false });
         } catch (error) {
-          console.error('Error generating kode KOP:', error);
+          console.error(`Error generating kode ${ownerType}:`, error);
         }
       };
 
-      generateKode();
+      // Generate kode jika:
+      // 1. Create mode (selalu generate)
+      // 2. Edit mode dan owner_type BERUBAH dari nilai sebelumnya (prevOwnerTypeRef)
+      // Jangan generate saat dialog pertama kali dibuka (owner_type sama dengan produk asli)
+      if (!isEdit) {
+        // Create mode: selalu generate
+        generateKode();
+      } else if (isEdit && produk) {
+        // Edit mode: hanya generate jika owner_type berbeda dengan nilai sebelumnya
+        // Ini mencegah generate saat dialog dibuka, tapi tetap generate saat user switch owner_type
+        const prevOwnerType = prevOwnerTypeRef.current;
+        if (prevOwnerType && prevOwnerType !== ownerType) {
+          // Owner_type berubah dari nilai sebelumnya - generate kode baru
+          generateKode();
+          prevOwnerTypeRef.current = ownerType;
+        } else if (!prevOwnerType) {
+          // prevOwnerType belum di-set (dialog baru dibuka) - jangan generate, set ref saja
+          prevOwnerTypeRef.current = ownerType;
+        }
+        // Jika owner_type sama dengan prevOwnerType, jangan generate (pertahankan kode yang ada)
+      }
     }
-  }, [open, isEdit, setValue]);
+  }, [open, isEdit, ownerType, setValue, produk?.id]);
+
+  // Update ref when produk changes - set initial owner_type
+  useEffect(() => {
+    if (produk && produk.owner_type) {
+      prevOwnerTypeRef.current = produk.owner_type;
+    }
+  }, [produk?.id, produk?.owner_type]);
 
   useEffect(() => {
-    if (open) {
-      if (produk) {
-        reset({
-          kode_produk: produk.kode_produk,
-          nama_produk: produk.nama_produk,
-          kategori: produk.kategori || '',
-          satuan: produk.satuan,
-          harga_beli: produk.harga_beli,
-          harga_jual_ecer: produk.harga_jual_ecer || produk.harga_jual || 0,
-          harga_jual_grosir: produk.harga_jual_grosir || produk.harga_jual || 0,
-          barcode: produk.barcode || '',
-          deskripsi: produk.deskripsi || '',
-        });
-        setSelectedKategori(produk.kategori || '');
-      } else {
-        reset({
-          kode_produk: '',
-          satuan: 'pcs',
-          harga_beli: 0,
-          harga_jual_ecer: 0,
-          harga_jual_grosir: 0,
-        });
-        setSelectedKategori('');
-      }
+    if (!open) {
+      // Reset form when dialog closes
+      reset();
+      setSelectedKategori('');
       setShowAddKategori(false);
       setNewKategori('');
+      return;
     }
-  }, [open, produk, reset]);
+
+    // When dialog opens, load data
+    if (produk) {
+      // Edit mode: load produk data
+      const produkOwnerType = produk.owner_type || 'koperasi';
+      reset({
+        kode_produk: produk.kode_produk || '',
+        nama_produk: produk.nama_produk || '',
+        kategori: produk.kategori || '',
+        satuan: produk.satuan || 'pcs',
+        harga_beli: produk.harga_beli || 0,
+        harga_jual_ecer: produk.harga_jual_ecer || produk.harga_jual || 0,
+        harga_jual_grosir: produk.harga_jual_grosir || produk.harga_jual || 0,
+        owner_type: produkOwnerType,
+        barcode: produk.barcode || '',
+        deskripsi: produk.deskripsi || '',
+        stok: produk.stok || produk.stock || 0,
+      });
+      setSelectedKategori(produk.kategori || '');
+      setShowAddKategori(false);
+      setNewKategori('');
+      // Set initial owner_type ref untuk mencegah auto-generate saat dialog dibuka
+      prevOwnerTypeRef.current = produkOwnerType;
+    } else {
+      // Create mode: reset to defaults
+      reset({
+        kode_produk: '',
+        satuan: 'pcs',
+        harga_beli: 0,
+        harga_jual_ecer: 0,
+        harga_jual_grosir: 0,
+        owner_type: 'koperasi',
+        stok: 0,
+      });
+      setSelectedKategori('');
+      setShowAddKategori(false);
+      setNewKategori('');
+      prevOwnerTypeRef.current = 'koperasi';
+    }
+  }, [open, produk?.id, reset]); // Hapus produk?.kode_produk dari dependencies untuk mencegah re-trigger
 
   const addKategoriMutation = useMutation({
     mutationFn: async (namaKategori: string) => {
@@ -140,6 +199,39 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
       // Get kategori_id
       const kategoriObj = kategoriList.find(k => k.nama === selectedKategori);
       
+      // Get sumber_modal_id based on owner_type
+      const sumberModalName = data.owner_type === 'yayasan' ? 'Yayasan' : 'Koperasi';
+      const { data: sumberModal } = await supabase
+        .from('kop_sumber_modal')
+        .select('id')
+        .eq('nama', sumberModalName)
+        .single();
+      
+      // Calculate bagi_hasil_yayasan based on owner_type
+      const bagiHasil = data.owner_type === 'yayasan' ? 70 : 0;
+      
+      // If harga_jual_grosir is empty/null (not explicitly set to 0), use harga_jual_ecer (eceran only)
+      // If user explicitly sets to 0, save 0 (means eceran only)
+      // Ensure we always send a valid number (not null/undefined)
+      const hargaEcer = Number(data.harga_jual_ecer) || 0;
+      const hargaGrosirValue = data.harga_jual_grosir;
+      
+      // Check if value is explicitly provided (not undefined/null/empty string)
+      // If explicitly 0, save 0. If empty/null/undefined, use harga ecer
+      let hargaGrosir: number;
+      const isValueEmpty = hargaGrosirValue === undefined || 
+                          hargaGrosirValue === null || 
+                          (typeof hargaGrosirValue === 'string' && String(hargaGrosirValue).trim() === '');
+      
+      if (isValueEmpty) {
+        // Field is empty - use harga ecer
+        hargaGrosir = hargaEcer;
+      } else {
+        // Field has value - use it (even if 0)
+        const hargaGrosirNum = Number(hargaGrosirValue);
+        hargaGrosir = !isNaN(hargaGrosirNum) ? hargaGrosirNum : hargaEcer;
+      }
+      
       const { data: result, error } = await supabase
         .from('kop_barang')
         .insert({
@@ -147,13 +239,15 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
           nama_barang: data.nama_produk,
           kategori_id: kategoriObj?.id,
           satuan_dasar: data.satuan,
-          harga_beli: data.harga_beli,
-          harga_jual_ecer: data.harga_jual_ecer,
-          harga_jual_grosir: data.harga_jual_grosir,
-          stok: 0,
+          harga_beli: Number(data.harga_beli) || 0,
+          harga_jual_ecer: hargaEcer,
+          harga_jual_grosir: hargaGrosir,
+          owner_type: data.owner_type || 'koperasi',
+          bagi_hasil_yayasan: bagiHasil,
+          stok: (data as any).stok || 0,
           stok_minimum: 5,
           is_active: true,
-          sumber_modal_id: (await supabase.from('kop_sumber_modal').select('id').eq('nama', 'Koperasi').single()).data?.id,
+          sumber_modal_id: sumberModal?.id || null,
         })
         .select()
         .single();
@@ -161,8 +255,21 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
       if (error) throw error;
       return result;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
+    onSuccess: async () => {
+      // Invalidate all related queries
+      // Use exact: false to match all queries that start with these keys
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk'], exact: false }),
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'], exact: false }),
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-total-count'], exact: false }),
+      ]);
+      
+      // Force refetch all matching queries
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['koperasi-produk-with-stock'], exact: false }),
+        queryClient.refetchQueries({ queryKey: ['koperasi-produk'], exact: false }),
+      ]);
+      
       toast.success('Produk berhasil ditambahkan');
       onClose();
     },
@@ -175,16 +282,56 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
     mutationFn: async ({ id, data }: { id: string; data: Partial<KoperasiProdukInsert> }) => {
       const kategoriObj = kategoriList.find(k => k.nama === selectedKategori);
       
+      // Calculate bagi_hasil_yayasan based on owner_type
+      const bagiHasil = data.owner_type === 'yayasan' ? 70 : 0;
+      
+      // If harga_jual_grosir is empty/null (not explicitly set to 0), use harga_jual_ecer (eceran only)
+      // If user explicitly sets to 0, save 0 (means eceran only)
+      // Ensure we always send a valid number (not null/undefined)
+      const hargaEcer = Number(data.harga_jual_ecer) || 0;
+      const hargaGrosirValue = data.harga_jual_grosir;
+      
+      // Check if value is explicitly provided (not undefined/null/empty string)
+      // If explicitly 0, save 0. If empty/null/undefined, use harga ecer
+      let hargaGrosir: number;
+      const isValueEmpty = hargaGrosirValue === undefined || 
+                          hargaGrosirValue === null || 
+                          (typeof hargaGrosirValue === 'string' && String(hargaGrosirValue).trim() === '');
+      
+      if (isValueEmpty) {
+        // Field is empty - use harga ecer
+        hargaGrosir = hargaEcer;
+      } else {
+        // Field has value - use it (even if 0)
+        const hargaGrosirNum = Number(hargaGrosirValue);
+        hargaGrosir = !isNaN(hargaGrosirNum) ? hargaGrosirNum : hargaEcer;
+      }
+      
+      const updateData: any = {
+        nama_barang: data.nama_produk,
+        kategori_id: kategoriObj?.id,
+        satuan_dasar: data.satuan,
+        harga_beli: Number(data.harga_beli) || 0,
+        harga_jual_ecer: hargaEcer,
+        harga_jual_grosir: hargaGrosir,
+        owner_type: data.owner_type || 'koperasi',
+        bagi_hasil_yayasan: bagiHasil,
+      };
+
+      // Always update kode_barang if kode_produk is provided
+      // This ensures kode is updated when owner_type changes and new kode is generated
+      if (data.kode_produk) {
+        updateData.kode_barang = data.kode_produk;
+      }
+
+      // Update stok jika ada
+      if ((data as any).stok !== undefined) {
+        updateData.stok = (data as any).stok;
+      }
+
       const { data: result, error } = await supabase
         .from('kop_barang')
-        .update({
-          nama_barang: data.nama_produk,
-          kategori_id: kategoriObj?.id,
-          satuan_dasar: data.satuan,
-          harga_beli: data.harga_beli,
-          harga_jual_ecer: data.harga_jual_ecer,
-          harga_jual_grosir: data.harga_jual_grosir,
-        })
+        .update(updateData)
         .eq('id', id)
         .select()
         .single();
@@ -192,8 +339,24 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
       if (error) throw error;
       return result;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
+    onSuccess: async (result) => {
+      // Invalidate all related queries to refresh the list
+      // Use exact: false to match all queries that start with these keys (including with search params)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk'], exact: false }),
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'], exact: false }),
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-total-count'], exact: false }),
+      ]);
+      
+      // Remove queries from cache to force fresh fetch
+      queryClient.removeQueries({ queryKey: ['koperasi-produk-with-stock'], exact: false });
+      
+      // Force refetch all matching queries
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['koperasi-produk-with-stock'], exact: false }),
+        queryClient.refetchQueries({ queryKey: ['koperasi-produk'], exact: false }),
+      ]);
+      
       toast.success('Produk berhasil diupdate');
       onClose();
     },
@@ -220,7 +383,7 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Produk' : 'Tambah Produk'}</DialogTitle>
         </DialogHeader>
@@ -240,6 +403,67 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
           <div>
             <Label>Nama Produk *</Label>
             <Input {...register('nama_produk', { required: true })} />
+          </div>
+
+          {/* Owner Type */}
+          <div>
+            <Label>Sumber/Owner Produk *</Label>
+            <RadioGroup
+              value={ownerType || 'koperasi'}
+              onValueChange={async (value) => {
+                const newOwnerType = value as 'koperasi' | 'yayasan';
+                const prevOwnerType = prevOwnerTypeRef.current || (produk?.owner_type || 'koperasi');
+                setValue('owner_type', newOwnerType);
+                
+                // Generate new kode SETIAP KALI owner_type berubah dari nilai sebelumnya
+                // Ini memastikan kode selalu berubah saat user switch owner_type
+                if (prevOwnerType !== newOwnerType) {
+                  try {
+                    const prefix = newOwnerType === 'yayasan' ? 'YYS-' : 'KOP-';
+                    const { data, error } = await supabase
+                      .from('kop_barang')
+                      .select('kode_barang, owner_type')
+                      .eq('owner_type', newOwnerType)
+                      .like('kode_barang', `${prefix}%`)
+                      .order('kode_barang', { ascending: false })
+                      .limit(1);
+
+                    if (error) throw error;
+
+                    let nextNum = 1;
+                    if (data && data.length > 0 && data[0].kode_barang) {
+                      const match = data[0].kode_barang.match(new RegExp(`^${prefix}(\\d+)$`));
+                      if (match) {
+                        nextNum = parseInt(match[1], 10) + 1;
+                      }
+                    }
+
+                    const generatedKode = `${prefix}${nextNum.toString().padStart(4, '0')}`;
+                    setValue('kode_produk', generatedKode, { shouldValidate: false });
+                    prevOwnerTypeRef.current = newOwnerType;
+                  } catch (error) {
+                    console.error(`Error generating kode ${newOwnerType}:`, error);
+                  }
+                }
+              }}
+              className="flex gap-4 mt-2"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="koperasi" id="koperasi" />
+                <Label htmlFor="koperasi" className="font-normal cursor-pointer">
+                  Milik Koperasi
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="yayasan" id="yayasan" />
+                <Label htmlFor="yayasan" className="font-normal cursor-pointer">
+                  Milik Yayasan
+                </Label>
+              </div>
+            </RadioGroup>
+            <p className="text-xs text-muted-foreground mt-1">
+              Produk dengan nama sama tapi sumber berbeda akan disimpan sebagai produk terpisah
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -322,6 +546,18 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
             </div>
           </div>
 
+          <div>
+            <Label>Qty (Stok) *</Label>
+            <Input
+              type="number"
+              {...register('stok', { required: true, valueAsNumber: true, min: 0 })}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Jumlah stok produk saat ini
+            </p>
+          </div>
+
           <div className="space-y-3">
             <div>
               <Label>Harga Beli *</Label>
@@ -343,13 +579,13 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
                 </p>
               </div>
               <div>
-                <Label>Harga Jual Grosir *</Label>
+                <Label>Harga Jual Grosir (Opsional)</Label>
                 <Input
                   type="number"
-                  {...register('harga_jual_grosir', { required: true, valueAsNumber: true })}
+                  {...register('harga_jual_grosir', { valueAsNumber: true })}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Margin: {marginGrosirPersen}%
+                  Harga jual untuk pembelian grosir. Jika dikosongkan, akan menggunakan harga eceran.
                 </p>
               </div>
             </div>

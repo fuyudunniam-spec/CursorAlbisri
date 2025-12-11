@@ -98,78 +98,44 @@ export default function SimpleTransferDialog({
     setIsSubmitting(true);
 
     try {
-      if (tujuan === 'koperasi') {
-        // Transfer ke koperasi menggunakan asset management service
-        // Ini akan otomatis:
-        // 1. Kurangi stock inventaris yayasan
-        // 2. Create/update kop_barang dengan HPP dan bagi hasil
-        // 3. Tambah stock koperasi
-        // 4. Catat asset_transfer_log
-        
-        const hpp = item.harga_perolehan || 0;
-        
-        await assetManagementService.transferAsset({
-          inventaris_id: item.id,
-          quantity: qty,
-          harga_transfer: hpp, // Gunakan HPP dari inventaris
-          notes: catatan || `Transfer ke Koperasi: ${item.nama_barang}`,
+      // Transfer ke tujuan (distribusi, dapur, asrama, kantor, lainnya)
+      // Kurangi stock inventaris dan catat transaksi
+      // Note: Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+      const newStock = (item.jumlah || 0) - qty;
+      
+      const { error: updateError } = await supabase
+        .from('inventaris')
+        .update({ jumlah: newStock })
+        .eq('id', item.id);
+
+      if (updateError) throw updateError;
+
+      // Catat transaksi inventaris
+      const { error: transError } = await supabase
+        .from('transaksi_inventaris')
+        .insert({
+          item_id: item.id,
+          tipe: 'Keluar',
+          keluar_mode: `Transfer ke ${tujuan}`,
+          jumlah: qty,
+          harga_satuan: item.harga_perolehan || 0,
+          tanggal: new Date().toISOString(),
+          catatan: catatan || `Transfer ke ${tujuan}`,
+          before_qty: item.jumlah,
+          after_qty: newStock,
         });
 
-        // Invalidate semua query yang relevan untuk update otomatis di modul koperasi dan inventaris
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-yayasan-items'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-dashboard-stats'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['asset-transfer-log'] });
+      if (transError) throw transError;
 
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke Koperasi. Stock koperasi telah ditambahkan.`,
-        });
-      } else {
-        // Transfer ke tujuan lain (distribusi, dll)
-        // Kurangi stock inventaris dan catat transaksi
-        const newStock = (item.jumlah || 0) - qty;
-        
-        const { error: updateError } = await supabase
-          .from('inventaris')
-          .update({ jumlah: newStock })
-          .eq('id', item.id);
+      // Invalidate query inventaris untuk update otomatis
+      queryClient.invalidateQueries({ queryKey: ['inventaris'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
 
-        if (updateError) throw updateError;
-
-        // Catat transaksi inventaris
-        const { error: transError } = await supabase
-          .from('transaksi_inventaris')
-          .insert({
-            item_id: item.id,
-            tipe: 'Keluar',
-            keluar_mode: `Transfer ke ${tujuan}`,
-            jumlah: qty,
-            harga_satuan: item.harga_perolehan || 0,
-            tanggal: new Date().toISOString(),
-            catatan: catatan || `Transfer ke ${tujuan}`,
-            before_qty: item.jumlah,
-            after_qty: newStock,
-          });
-
-        if (transError) throw transError;
-
-        // Invalidate query inventaris untuk update otomatis
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
-        });
-      }
+      toast({
+        title: 'Transfer Berhasil',
+        description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
+      });
 
       onClose();
     } catch (error: any) {
@@ -237,7 +203,6 @@ export default function SimpleTransferDialog({
                 <SelectValue placeholder="Pilih tujuan" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="koperasi">Koperasi (untuk dijual)</SelectItem>
                 <SelectItem value="distribusi">Distribusi Bantuan</SelectItem>
                 <SelectItem value="dapur">Dapur</SelectItem>
                 <SelectItem value="asrama">Asrama</SelectItem>
@@ -245,11 +210,9 @@ export default function SimpleTransferDialog({
                 <SelectItem value="lainnya">Lainnya</SelectItem>
               </SelectContent>
             </Select>
-            {tujuan === 'koperasi' && (
-              <p className="text-xs text-muted-foreground">
-                ⚠️ Transfer ke koperasi akan otomatis mencatat beban koperasi ke yayasan berdasarkan HPP
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              💡 Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+            </p>
           </div>
 
           {/* Catatan */}
@@ -400,78 +363,44 @@ export default function SimpleTransferDialog({
     setIsSubmitting(true);
 
     try {
-      if (tujuan === 'koperasi') {
-        // Transfer ke koperasi menggunakan asset management service
-        // Ini akan otomatis:
-        // 1. Kurangi stock inventaris yayasan
-        // 2. Create/update kop_barang dengan HPP dan bagi hasil
-        // 3. Tambah stock koperasi
-        // 4. Catat asset_transfer_log
-        
-        const hpp = item.harga_perolehan || 0;
-        
-        await assetManagementService.transferAsset({
-          inventaris_id: item.id,
-          quantity: qty,
-          harga_transfer: hpp, // Gunakan HPP dari inventaris
-          notes: catatan || `Transfer ke Koperasi: ${item.nama_barang}`,
+      // Transfer ke tujuan (distribusi, dapur, asrama, kantor, lainnya)
+      // Kurangi stock inventaris dan catat transaksi
+      // Note: Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+      const newStock = (item.jumlah || 0) - qty;
+      
+      const { error: updateError } = await supabase
+        .from('inventaris')
+        .update({ jumlah: newStock })
+        .eq('id', item.id);
+
+      if (updateError) throw updateError;
+
+      // Catat transaksi inventaris
+      const { error: transError } = await supabase
+        .from('transaksi_inventaris')
+        .insert({
+          item_id: item.id,
+          tipe: 'Keluar',
+          keluar_mode: `Transfer ke ${tujuan}`,
+          jumlah: qty,
+          harga_satuan: item.harga_perolehan || 0,
+          tanggal: new Date().toISOString(),
+          catatan: catatan || `Transfer ke ${tujuan}`,
+          before_qty: item.jumlah,
+          after_qty: newStock,
         });
 
-        // Invalidate semua query yang relevan untuk update otomatis di modul koperasi dan inventaris
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-yayasan-items'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-dashboard-stats'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['asset-transfer-log'] });
+      if (transError) throw transError;
 
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke Koperasi. Stock koperasi telah ditambahkan.`,
-        });
-      } else {
-        // Transfer ke tujuan lain (distribusi, dll)
-        // Kurangi stock inventaris dan catat transaksi
-        const newStock = (item.jumlah || 0) - qty;
-        
-        const { error: updateError } = await supabase
-          .from('inventaris')
-          .update({ jumlah: newStock })
-          .eq('id', item.id);
+      // Invalidate query inventaris untuk update otomatis
+      queryClient.invalidateQueries({ queryKey: ['inventaris'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
 
-        if (updateError) throw updateError;
-
-        // Catat transaksi inventaris
-        const { error: transError } = await supabase
-          .from('transaksi_inventaris')
-          .insert({
-            item_id: item.id,
-            tipe: 'Keluar',
-            keluar_mode: `Transfer ke ${tujuan}`,
-            jumlah: qty,
-            harga_satuan: item.harga_perolehan || 0,
-            tanggal: new Date().toISOString(),
-            catatan: catatan || `Transfer ke ${tujuan}`,
-            before_qty: item.jumlah,
-            after_qty: newStock,
-          });
-
-        if (transError) throw transError;
-
-        // Invalidate query inventaris untuk update otomatis
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
-        });
-      }
+      toast({
+        title: 'Transfer Berhasil',
+        description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
+      });
 
       onClose();
     } catch (error: any) {
@@ -539,7 +468,6 @@ export default function SimpleTransferDialog({
                 <SelectValue placeholder="Pilih tujuan" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="koperasi">Koperasi (untuk dijual)</SelectItem>
                 <SelectItem value="distribusi">Distribusi Bantuan</SelectItem>
                 <SelectItem value="dapur">Dapur</SelectItem>
                 <SelectItem value="asrama">Asrama</SelectItem>
@@ -547,11 +475,9 @@ export default function SimpleTransferDialog({
                 <SelectItem value="lainnya">Lainnya</SelectItem>
               </SelectContent>
             </Select>
-            {tujuan === 'koperasi' && (
-              <p className="text-xs text-muted-foreground">
-                ⚠️ Transfer ke koperasi akan otomatis mencatat beban koperasi ke yayasan berdasarkan HPP
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              💡 Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+            </p>
           </div>
 
           {/* Catatan */}
@@ -700,78 +626,44 @@ export default function SimpleTransferDialog({
     setIsSubmitting(true);
 
     try {
-      if (tujuan === 'koperasi') {
-        // Transfer ke koperasi menggunakan asset management service
-        // Ini akan otomatis:
-        // 1. Kurangi stock inventaris yayasan
-        // 2. Create/update kop_barang dengan HPP dan bagi hasil
-        // 3. Tambah stock koperasi
-        // 4. Catat asset_transfer_log
-        
-        const hpp = item.harga_perolehan || 0;
-        
-        await assetManagementService.transferAsset({
-          inventaris_id: item.id,
-          quantity: qty,
-          harga_transfer: hpp, // Gunakan HPP dari inventaris
-          notes: catatan || `Transfer ke Koperasi: ${item.nama_barang}`,
+      // Transfer ke tujuan (distribusi, dapur, asrama, kantor, lainnya)
+      // Kurangi stock inventaris dan catat transaksi
+      // Note: Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+      const newStock = (item.jumlah || 0) - qty;
+      
+      const { error: updateError } = await supabase
+        .from('inventaris')
+        .update({ jumlah: newStock })
+        .eq('id', item.id);
+
+      if (updateError) throw updateError;
+
+      // Catat transaksi inventaris
+      const { error: transError } = await supabase
+        .from('transaksi_inventaris')
+        .insert({
+          item_id: item.id,
+          tipe: 'Keluar',
+          keluar_mode: `Transfer ke ${tujuan}`,
+          jumlah: qty,
+          harga_satuan: item.harga_perolehan || 0,
+          tanggal: new Date().toISOString(),
+          catatan: catatan || `Transfer ke ${tujuan}`,
+          before_qty: item.jumlah,
+          after_qty: newStock,
         });
 
-        // Invalidate semua query yang relevan untuk update otomatis di modul koperasi dan inventaris
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-yayasan-items'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-dashboard-stats'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['asset-transfer-log'] });
+      if (transError) throw transError;
 
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke Koperasi. Stock koperasi telah ditambahkan.`,
-        });
-      } else {
-        // Transfer ke tujuan lain (distribusi, dll)
-        // Kurangi stock inventaris dan catat transaksi
-        const newStock = (item.jumlah || 0) - qty;
-        
-        const { error: updateError } = await supabase
-          .from('inventaris')
-          .update({ jumlah: newStock })
-          .eq('id', item.id);
+      // Invalidate query inventaris untuk update otomatis
+      queryClient.invalidateQueries({ queryKey: ['inventaris'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
 
-        if (updateError) throw updateError;
-
-        // Catat transaksi inventaris
-        const { error: transError } = await supabase
-          .from('transaksi_inventaris')
-          .insert({
-            item_id: item.id,
-            tipe: 'Keluar',
-            keluar_mode: `Transfer ke ${tujuan}`,
-            jumlah: qty,
-            harga_satuan: item.harga_perolehan || 0,
-            tanggal: new Date().toISOString(),
-            catatan: catatan || `Transfer ke ${tujuan}`,
-            before_qty: item.jumlah,
-            after_qty: newStock,
-          });
-
-        if (transError) throw transError;
-
-        // Invalidate query inventaris untuk update otomatis
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
-        });
-      }
+      toast({
+        title: 'Transfer Berhasil',
+        description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
+      });
 
       onClose();
     } catch (error: any) {
@@ -839,7 +731,6 @@ export default function SimpleTransferDialog({
                 <SelectValue placeholder="Pilih tujuan" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="koperasi">Koperasi (untuk dijual)</SelectItem>
                 <SelectItem value="distribusi">Distribusi Bantuan</SelectItem>
                 <SelectItem value="dapur">Dapur</SelectItem>
                 <SelectItem value="asrama">Asrama</SelectItem>
@@ -847,11 +738,9 @@ export default function SimpleTransferDialog({
                 <SelectItem value="lainnya">Lainnya</SelectItem>
               </SelectContent>
             </Select>
-            {tujuan === 'koperasi' && (
-              <p className="text-xs text-muted-foreground">
-                ⚠️ Transfer ke koperasi akan otomatis mencatat beban koperasi ke yayasan berdasarkan HPP
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              💡 Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+            </p>
           </div>
 
           {/* Catatan */}
@@ -1002,78 +891,44 @@ export default function SimpleTransferDialog({
     setIsSubmitting(true);
 
     try {
-      if (tujuan === 'koperasi') {
-        // Transfer ke koperasi menggunakan asset management service
-        // Ini akan otomatis:
-        // 1. Kurangi stock inventaris yayasan
-        // 2. Create/update kop_barang dengan HPP dan bagi hasil
-        // 3. Tambah stock koperasi
-        // 4. Catat asset_transfer_log
-        
-        const hpp = item.harga_perolehan || 0;
-        
-        await assetManagementService.transferAsset({
-          inventaris_id: item.id,
-          quantity: qty,
-          harga_transfer: hpp, // Gunakan HPP dari inventaris
-          notes: catatan || `Transfer ke Koperasi: ${item.nama_barang}`,
+      // Transfer ke tujuan (distribusi, dapur, asrama, kantor, lainnya)
+      // Kurangi stock inventaris dan catat transaksi
+      // Note: Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+      const newStock = (item.jumlah || 0) - qty;
+      
+      const { error: updateError } = await supabase
+        .from('inventaris')
+        .update({ jumlah: newStock })
+        .eq('id', item.id);
+
+      if (updateError) throw updateError;
+
+      // Catat transaksi inventaris
+      const { error: transError } = await supabase
+        .from('transaksi_inventaris')
+        .insert({
+          item_id: item.id,
+          tipe: 'Keluar',
+          keluar_mode: `Transfer ke ${tujuan}`,
+          jumlah: qty,
+          harga_satuan: item.harga_perolehan || 0,
+          tanggal: new Date().toISOString(),
+          catatan: catatan || `Transfer ke ${tujuan}`,
+          before_qty: item.jumlah,
+          after_qty: newStock,
         });
 
-        // Invalidate semua query yang relevan untuk update otomatis di modul koperasi dan inventaris
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-with-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-yayasan-items'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-stock'] });
-        queryClient.invalidateQueries({ queryKey: ['koperasi-dashboard-stats'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['asset-transfer-log'] });
+      if (transError) throw transError;
 
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke Koperasi. Stock koperasi telah ditambahkan.`,
-        });
-      } else {
-        // Transfer ke tujuan lain (distribusi, dll)
-        // Kurangi stock inventaris dan catat transaksi
-        const newStock = (item.jumlah || 0) - qty;
-        
-        const { error: updateError } = await supabase
-          .from('inventaris')
-          .update({ jumlah: newStock })
-          .eq('id', item.id);
+      // Invalidate query inventaris untuk update otomatis
+      queryClient.invalidateQueries({ queryKey: ['inventaris'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
 
-        if (updateError) throw updateError;
-
-        // Catat transaksi inventaris
-        const { error: transError } = await supabase
-          .from('transaksi_inventaris')
-          .insert({
-            item_id: item.id,
-            tipe: 'Keluar',
-            keluar_mode: `Transfer ke ${tujuan}`,
-            jumlah: qty,
-            harga_satuan: item.harga_perolehan || 0,
-            tanggal: new Date().toISOString(),
-            catatan: catatan || `Transfer ke ${tujuan}`,
-            before_qty: item.jumlah,
-            after_qty: newStock,
-          });
-
-        if (transError) throw transError;
-
-        // Invalidate query inventaris untuk update otomatis
-        queryClient.invalidateQueries({ queryKey: ['inventaris'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-items'] });
-        queryClient.invalidateQueries({ queryKey: ['inventaris-transactions'] });
-
-        toast({
-          title: 'Transfer Berhasil',
-          description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
-        });
-      }
+      toast({
+        title: 'Transfer Berhasil',
+        description: `${item.nama_barang} (${qty} ${item.satuan}) berhasil ditransfer ke ${tujuan}.`,
+      });
 
       onClose();
     } catch (error: any) {
@@ -1141,7 +996,6 @@ export default function SimpleTransferDialog({
                 <SelectValue placeholder="Pilih tujuan" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="koperasi">Koperasi (untuk dijual)</SelectItem>
                 <SelectItem value="distribusi">Distribusi Bantuan</SelectItem>
                 <SelectItem value="dapur">Dapur</SelectItem>
                 <SelectItem value="asrama">Asrama</SelectItem>
@@ -1149,11 +1003,9 @@ export default function SimpleTransferDialog({
                 <SelectItem value="lainnya">Lainnya</SelectItem>
               </SelectContent>
             </Select>
-            {tujuan === 'koperasi' && (
-              <p className="text-xs text-muted-foreground">
-                ⚠️ Transfer ke koperasi akan otomatis mencatat beban koperasi ke yayasan berdasarkan HPP
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              💡 Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
+            </p>
           </div>
 
           {/* Catatan */}

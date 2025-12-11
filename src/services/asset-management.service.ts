@@ -70,6 +70,10 @@ export const assetManagementService = {
   /**
    * Transfer asset from inventaris to koperasi
    * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
+   * 
+   * PERUBAHAN: Untuk transfer ke koperasi, sekarang membuat pengajuan_item_yayasan
+   * dengan status pending_koperasi. Stok inventaris TIDAK langsung dikurangi.
+   * Stok akan dikurangi saat admin koperasi approve pengajuan.
    */
   async transferAsset(data: TransferAssetRequest): Promise<AssetTransferLog> {
     try {
@@ -97,13 +101,6 @@ export const assetManagementService = {
         );
       }
 
-      if (data.harga_transfer <= 0) {
-        throw new AssetManagementError(
-          AssetManagementErrorCode.INVALID_TRANSFER_AMOUNT,
-          'Harga transfer harus lebih dari 0'
-        );
-      }
-
       // 2. Check inventaris stock
       const { data: inventaris, error: invError } = await supabase
         .from('inventaris')
@@ -126,189 +123,46 @@ export const assetManagementService = {
         );
       }
 
-      // 3. Generate transfer reference
-      const transferReference = await this.generateTransferReference();
+      // 3. Create pengajuan_item_yayasan untuk approval
+      // Stok inventaris TIDAK dikurangi dulu, tunggu approval dari admin koperasi
+      const nilaiPerolehan = inventaris.harga_perolehan || 0;
+      const usulanHpp = data.harga_transfer || nilaiPerolehan;
 
-      // 4. Create or update koperasi_produk
-      let koperasiProdukId: string;
-      
-      // Check if produk already exists for this inventaris
-      const { data: existingProduk } = await supabase
-        .from('kop_barang')
-        .select('id')
-        .eq('inventaris_id', data.inventaris_id)
-        .maybeSingle();
-
-      if (existingProduk) {
-        // Update existing produk
-        koperasiProdukId = existingProduk.id;
-        
-        // Update HPP jika berbeda dan recalculate harga jual berdasarkan margin
-        const hppYayasan = inventaris.harga_perolehan || data.harga_transfer;
-        const { error: updateError } = await supabase
-          .from('kop_barang')
-          .update({
-            harga_transfer: hppYayasan, // Update HPP (beban yayasan)
-            harga_beli: hppYayasan, // Update harga beli (HPP)
-            harga_jual_ecer: hppYayasan * 1.2, // Recalculate dengan margin 20%
-            harga_jual_grosir: hppYayasan * 1.15, // Recalculate dengan margin 15%
-            transfer_date: new Date().toISOString(),
-            transfer_reference: transferReference,
-            is_active: true, // Pastikan item aktif setelah transfer
-          })
-          .eq('id', koperasiProdukId);
-
-        if (updateError) {
-          throw new AssetManagementError(
-            AssetManagementErrorCode.ASSET_NOT_FOUND,
-            'Gagal mengupdate produk koperasi: ' + updateError.message
-          );
-        }
-      } else {
-        // Create new produk
-        const kodeProduk = await this.generateKodeProduk();
-        
-        // Get sumber modal Yayasan
-        const { data: sumberModal } = await supabase
-          .from('kop_sumber_modal')
-          .select('id')
-          .eq('nama', 'Yayasan')
-          .single();
-        
-        // Gunakan HPP dari inventaris jika ada, atau harga_transfer sebagai fallback
-        const hppYayasan = inventaris.harga_perolehan || data.harga_transfer;
-        
-        const { data: newProduk, error: createError } = await supabase
-          .from('kop_barang')
-          .insert({
-            kode_barang: kodeProduk,
-            nama_barang: inventaris.nama_barang,
-            kategori_id: null, // Will be set based on kategori if needed
-            satuan_dasar: inventaris.satuan || 'pcs',
-            harga_beli: hppYayasan, // HPP (Harga Pokok Penjualan) dari yayasan
-            harga_jual_ecer: hppYayasan * 1.2, // Default markup 20% dari HPP
-            harga_jual_grosir: hppYayasan * 1.15, // 15% markup untuk grosir dari HPP
-            inventaris_id: data.inventaris_id,
-            harga_transfer: hppYayasan, // HPP yang ditetapkan saat transfer (beban yayasan)
-            transfer_date: new Date().toISOString(),
-            transfer_reference: transferReference,
-            stok: 0, // Akan ditambah di step 6
-            stok_minimum: 0,
-            owner_type: 'yayasan', // Barang milik yayasan, dikelola koperasi
-            bagi_hasil_yayasan: 70, // 70% profit untuk yayasan, 30% untuk koperasi (skema margin)
-            sumber_modal_id: sumberModal?.id || '',
-            is_active: true,
-          })
-          .select()
-          .single();
-
-        if (createError || !newProduk) {
-          throw new AssetManagementError(
-            AssetManagementErrorCode.ASSET_NOT_FOUND,
-            'Gagal membuat produk koperasi: ' + (createError?.message || 'Unknown error')
-          );
-        }
-        koperasiProdukId = newProduk.id;
-        // Stock is already in kop_barang.stok field, no need for separate stock table
-      }
-
-      // 5. Update inventaris stock - langsung kurangi di tabel inventaris
-      const newStock = (inventaris.jumlah || 0) - data.quantity;
-      const { error: stockReduceError } = await supabase
-        .from('inventaris')
-        .update({ jumlah: newStock })
-        .eq('id', data.inventaris_id);
-
-      if (stockReduceError) {
-        throw new AssetManagementError(
-          AssetManagementErrorCode.ASSET_NOT_FOUND,
-          'Gagal mengurangi stock inventaris: ' + stockReduceError.message
-        );
-      }
-
-      // 5b. Create transaksi_inventaris untuk audit trail
-      const { error: invTransError } = await supabase
-        .from('transaksi_inventaris')
+      const { data: pengajuan, error: pengajuanError } = await supabase
+        .from('pengajuan_item_yayasan')
         .insert({
-          item_id: data.inventaris_id,
-          tipe: 'Keluar',
-          keluar_mode: 'Transfer Koperasi',
-          jumlah: data.quantity,
-          harga_satuan: data.harga_transfer,
-          harga_dasar: inventaris.harga_perolehan || data.harga_transfer, // Gunakan harga_perolehan sebagai HPP
-          tanggal: new Date().toISOString(),
-          catatan: data.notes || `Transfer ke Koperasi - ${transferReference}`,
-          referensi_koperasi_id: koperasiProdukId,
-          before_qty: inventaris.jumlah,
-          after_qty: newStock,
-        });
-
-      if (invTransError) {
-        // Rollback stock reduction
-        await supabase
-          .from('inventaris')
-          .update({ jumlah: inventaris.jumlah })
-          .eq('id', data.inventaris_id);
-        
-        throw new AssetManagementError(
-          AssetManagementErrorCode.ASSET_NOT_FOUND,
-          'Gagal mencatat transaksi inventaris: ' + invTransError.message
-        );
-      }
-
-      // 6. Update koperasi stock (stok field in kop_barang)
-      const { data: currentBarang, error: stockQueryError } = await supabase
-        .from('kop_barang')
-        .select('stok')
-        .eq('id', koperasiProdukId)
-        .single();
-
-      if (stockQueryError) {
-        throw new AssetManagementError(
-          AssetManagementErrorCode.ASSET_NOT_FOUND,
-          'Gagal mengambil data stock koperasi: ' + stockQueryError.message
-        );
-      }
-
-      const { error: stockUpdateError } = await supabase
-        .from('kop_barang')
-        .update({
-          stok: (currentBarang?.stok || 0) + data.quantity,
-        })
-        .eq('id', koperasiProdukId);
-
-      if (stockUpdateError) {
-        throw new AssetManagementError(
-          AssetManagementErrorCode.ASSET_NOT_FOUND,
-          'Gagal mengupdate stock koperasi: ' + stockUpdateError.message
-        );
-      }
-
-      // 7. Create asset_transfer_log
-      const { data: transferLog, error: logError } = await supabase
-        .from('asset_transfer_log')
-        .insert({
-          inventaris_id: data.inventaris_id,
-          koperasi_produk_id: koperasiProdukId,
-          transfer_reference: transferReference,
-          quantity_transferred: data.quantity,
-          harga_transfer: data.harga_transfer,
-          transfer_date: new Date().toISOString(),
-          transferred_by: user.user.id,
-          notes: data.notes,
-          status: 'active',
+          inventaris_item_id: data.inventaris_id,
+          nama: inventaris.nama_barang,
+          qty: data.quantity,
+          nilai_perolehan: nilaiPerolehan,
+          usulan_hpp: usulanHpp,
+          status: 'pending_koperasi',
+          created_by: user.user.id,
         })
         .select()
         .single();
 
-      if (logError || !transferLog) {
+      if (pengajuanError || !pengajuan) {
         throw new AssetManagementError(
           AssetManagementErrorCode.ASSET_NOT_FOUND,
-          'Gagal mencatat log transfer: ' + (logError?.message || 'Unknown error')
+          'Gagal membuat pengajuan transfer: ' + (pengajuanError?.message || 'Unknown error')
         );
       }
 
-      return transferLog as AssetTransferLog;
+      // 4. Return a mock AssetTransferLog untuk backward compatibility
+      // Note: Actual transfer will happen when admin approves the pengajuan
+      return {
+        id: pengajuan.id,
+        inventaris_id: data.inventaris_id,
+        koperasi_produk_id: '', // Will be set when approved
+        transfer_reference: `PENGAJUAN-${pengajuan.id.substring(0, 8).toUpperCase()}`,
+        quantity_transferred: data.quantity,
+        harga_transfer: usulanHpp,
+        transfer_date: new Date().toISOString(),
+        transferred_by: user.user.id,
+        notes: data.notes || 'Pengajuan transfer - menunggu approval',
+        status: 'pending',
+      } as AssetTransferLog;
     } catch (error) {
       // Re-throw AssetManagementError as-is
       if (error instanceof AssetManagementError) {

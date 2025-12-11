@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -11,12 +12,14 @@ import {
   CreditCard,
   FileText,
   BarChart3,
-  PieChart
+  PieChart,
+  ExternalLink
 } from "lucide-react";
 import { koperasiService } from "@/services/koperasi.service";
 import { supabase } from "@/integrations/supabase/client";
 import { startOfMonth, endOfMonth, format, subMonths } from "date-fns";
 import { id as localeId } from "date-fns/locale";
+import { useNavigate } from "react-router-dom";
 import {
   LineChart,
   Line,
@@ -35,6 +38,7 @@ import {
 } from "recharts";
 
 export default function KeuanganDashboard() {
+  const navigate = useNavigate();
   const currentDate = new Date();
   const startOfMonthDate = startOfMonth(currentDate);
   const endOfMonthDate = endOfMonth(currentDate);
@@ -117,16 +121,63 @@ export default function KeuanganDashboard() {
   const { data: recentTransactions } = useQuery({
     queryKey: ['koperasi-recent-transactions'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('keuangan_koperasi')
-        .select('id, tanggal, jenis_transaksi, kategori, jumlah, deskripsi, metode_pembayaran')
+        .select('id, tanggal, jenis_transaksi, kategori, jumlah, deskripsi, sub_kategori, penerima_pembayar')
         .eq('status', 'posted')
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(10);
       
+      if (error) {
+        console.error('Error fetching recent transactions:', error);
+        return [];
+      }
+      
       return data || [];
     },
+  });
+
+  // Get total bagian_yayasan yang belum_disetor
+  // Diambil dari koperasi_bagi_hasil_log dimana status != 'paid' atau tanggal_bayar is null
+  // Menggunakan query yang sama seperti di KelolaHPPDanBagiHasilPage
+  const { data: hakYayasanBelumDisetor, isLoading: loadingHakYayasan } = useQuery({
+    queryKey: ['hak-yayasan-belum-disetor'],
+    queryFn: async () => {
+      try {
+        // Get all data first (same approach as KelolaHPPDanBagiHasilPage)
+        const { data, error } = await supabase
+          .from('koperasi_bagi_hasil_log')
+          .select('*');
+
+        if (error) {
+          console.error('Error fetching hak yayasan:', error);
+          return 0;
+        }
+
+        if (!data || data.length === 0) {
+          return 0;
+        }
+
+        // Transform and sum (same logic as KelolaHPPDanBagiHasilPage line 850)
+        const total = (data || []).reduce((sum, item: any) => {
+          // Use the same field name as in KelolaHPPDanBagiHasilPage
+          const bagianYayasan = Number(item.bagi_hasil_yayasan || 0);
+          // Belum disetor jika: status bukan 'paid' DAN tanggal_bayar null
+          const isBelumDisetor = item.status !== 'paid' && !item.tanggal_bayar;
+          if (isBelumDisetor && bagianYayasan > 0) {
+            return sum + bagianYayasan;
+          }
+          return sum;
+        }, 0);
+
+        return total;
+      } catch (error: any) {
+        console.error('Error calculating hak yayasan:', error);
+        return 0;
+      }
+    },
+    refetchInterval: 30000,
   });
 
   const formatCurrency = (amount: number) => {
@@ -189,6 +240,58 @@ export default function KeuanganDashboard() {
             {format(startOfMonthDate, 'dd MMMM yyyy', { locale: localeId })} - {format(endOfMonthDate, 'dd MMMM yyyy', { locale: localeId })}
           </p>
         </div>
+      </div>
+
+      {/* Saldo Kas & Hak Yayasan Cards - New Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Card 1 - Saldo Kas Koperasi */}
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-700">Saldo Kas Koperasi</CardTitle>
+            <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+              <Wallet className="h-5 w-5 text-blue-600" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-gray-900">
+              {formatCurrency(keuanganStats?.saldoKasKoperasi || 0)}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Card 2 - Hak Yayasan di Kas Koperasi */}
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-700">Hak Yayasan di Kas Koperasi</CardTitle>
+            <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+              <Building2 className="h-5 w-5 text-amber-600" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-gray-900 mb-2">
+              {loadingHakYayasan ? (
+                <span className="text-sm text-muted-foreground">Memuat...</span>
+              ) : (
+                formatCurrency(hakYayasanBelumDisetor || 0)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              Perkiraan bagian yayasan dari penjualan produk yayasan yang belum disetor.
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7 px-2 text-primary hover:text-primary/80"
+              onClick={() => {
+                // Navigate to Kalkulator with current month filter
+                navigate('/koperasi/keuangan/kelola-hpp');
+              }}
+            >
+              Lihat detail
+              <ExternalLink className="h-3 w-3 ml-1" />
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Summary Cards - Top Row */}

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { createTransaction } from '@/services/inventaris.service';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { InventoryItem } from '@/types/inventaris.types';
 import { Calendar } from 'lucide-react';
@@ -18,7 +19,6 @@ interface KeluarItemDialogProps {
 }
 
 const TujuanOptions = [
-  { value: 'Koperasi', label: 'Koperasi' },
   { value: 'Dapur', label: 'Dapur' },
   { value: 'Distribusi', label: 'Distribusi Bantuan' },
 ];
@@ -53,14 +53,12 @@ export default function KeluarItemDialog({ open, onClose, item, onSuccess }: Kel
     try {
       setIsSubmitting(true);
 
-      // Tentukan keluar_mode berdasarkan tujuan
+      // Untuk tujuan (Dapur, Distribusi): Langsung kurangi stok dan catat transaksi
+      // Note: Transfer ke Koperasi hanya bisa dilakukan dari modul Koperasi (tab "Item Yayasan")
       let keluarMode: string;
       let penerima: string;
 
-      if (tujuan === 'Koperasi') {
-        keluarMode = 'Koperasi';
-        penerima = 'Koperasi';
-      } else if (tujuan === 'Dapur') {
+      if (tujuan === 'Dapur') {
         keluarMode = 'Distribusi';
         penerima = 'Dapur';
       } else {

@@ -32,7 +32,7 @@ export default function StockOpnameKoperasi() {
   // Get selected produk detail
   const selectedProdukData = produkList.find((p: any) => p.id === selectedProduk);
 
-  // Update stock mutation
+  // Update stock mutation - using atomic RPC function
   const updateStockMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProduk || !stokFisik) {
@@ -40,30 +40,27 @@ export default function StockOpnameKoperasi() {
       }
 
       const stokFisikNum = parseInt(stokFisik);
-      const stokSistem = selectedProdukData?.stok || 0;
-      const selisih = stokFisikNum - stokSistem;
+      const { data: { user } } = await supabase.auth.getUser();
 
-      // Update stok di kop_barang
-      const { error: updateError } = await supabase
-        .from('kop_barang')
-        .update({ stok: stokFisikNum })
-        .eq('id', selectedProduk);
+      // Use atomic RPC function for stock opname
+      const { data: result, error } = await supabase.rpc(
+        'rpc_stock_opname_koperasi',
+        {
+          p_barang_id: selectedProduk,
+          p_stok_fisik: stokFisikNum,
+          p_catatan: catatan || null,
+          p_user_id: user?.id || null,
+        }
+      );
 
-      if (updateError) throw updateError;
+      if (error) {
+        console.error('Error in stock opname:', error);
+        throw new Error(error.message || 'Gagal melakukan stock opname');
+      }
 
-      // Catat di kartu stok
-      const { error: kartuError } = await supabase
-        .from('kop_kartu_stok')
-        .insert({
-          barang_id: selectedProduk,
-          jenis_transaksi: selisih >= 0 ? 'koreksi_masuk' : 'koreksi_keluar',
-          masuk: selisih >= 0 ? Math.abs(selisih) : 0,
-          keluar: selisih < 0 ? Math.abs(selisih) : 0,
-          saldo_akhir: stokFisikNum,
-          keterangan: `Stock Opname: ${catatan || 'Penyesuaian stok fisik'}`,
-        });
-
-      if (kartuError) throw kartuError;
+      if (!result || !result.success) {
+        throw new Error(result?.error || 'Gagal melakukan stock opname');
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['koperasi-produk-opname'] });
