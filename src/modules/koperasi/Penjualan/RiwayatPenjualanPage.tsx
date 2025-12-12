@@ -27,7 +27,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { ShoppingCart, Eye, Plus, Edit, Trash2, TrendingUp, TrendingDown, Building2, Store, Wallet, BarChart3 } from 'lucide-react';
+import { ShoppingCart, Eye, Plus, Edit, Trash2, TrendingUp, TrendingDown, Building2, Store, Wallet, BarChart3, Printer } from 'lucide-react';
+import { Root as VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { koperasiService, setoranCashKasirService } from '@/services/koperasi.service';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay, subMonths, startOfYear, endOfYear } from 'date-fns';
 import { id } from 'date-fns/locale';
@@ -37,7 +38,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SalesAnalytics from './components/SalesAnalytics';
 import SetorCashDialog from './components/SetorCashDialog';
+import ReceiptNota from '../Kasir/components/ReceiptNota';
 import { supabase } from '@/integrations/supabase/client';
+import { formatRupiah } from '@/utils/formatCurrency';
+import { QUERY_STALE_TIME, TOAST_DURATION } from '../constants';
 
 interface UnifiedSale {
   sale_id: string;
@@ -47,6 +51,8 @@ interface UnifiedSale {
   source_type: 'penjualan_header' | 'transaksi_inventaris' | 'kop_penjualan';
   created_at: string;
   created_by?: string;
+  items_summary?: string | null; // NEW: Daftar item terjual
+  nomor_struk?: string | null; // NEW: Nomor struk untuk kop_penjualan
 }
 
 interface SaleDetail {
@@ -99,6 +105,27 @@ const RiwayatPenjualanPage = () => {
   const [showSetorCashDialog, setShowSetorCashDialog] = useState(false);
   const [kasirId, setKasirId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'analytics' | 'history'>('analytics');
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptData, setReceiptData] = useState<{
+    penjualan: {
+      id: string;
+      nomor_struk?: string;
+      tanggal: string;
+      kasir_name: string;
+      metode_pembayaran?: string;
+      total_transaksi: number;
+      jumlah_bayar?: number;
+      kembalian?: number;
+    };
+    items: Array<{
+      id: string;
+      nama_barang: string;
+      jumlah: number;
+      satuan: string;
+      harga_satuan_jual: number;
+      subtotal: number;
+    }>;
+  } | null>(null);
 
   const getDateRange = () => {
     const now = new Date();
@@ -144,7 +171,7 @@ const RiwayatPenjualanPage = () => {
       endDate,
       filterOwnerType: ownerTypeFilter 
     }),
-    staleTime: 30000,
+    staleTime: QUERY_STALE_TIME.SHORT,
   });
 
   // Get current user for setor cash
@@ -159,7 +186,7 @@ const RiwayatPenjualanPage = () => {
   const { data: salesSummary, isLoading: summaryLoading } = useQuery({
     queryKey: ['sales-summary-liabilities', dateFilter, startDate, endDate],
     queryFn: () => koperasiService.getSalesSummaryWithLiabilities({ startDate, endDate }),
-    staleTime: 30000,
+    staleTime: QUERY_STALE_TIME.SHORT,
   });
 
   // Get sales analytics - hourly data uses filter, but monthly trend always shows all data
@@ -171,7 +198,7 @@ const RiwayatPenjualanPage = () => {
       // Monthly trend always uses all data (no filter)
       monthlyTrendAllTime: true 
     }),
-    staleTime: 30000,
+    staleTime: QUERY_STALE_TIME.SHORT,
   });
 
   const handleViewDetail = async (sale: UnifiedSale) => {
@@ -185,8 +212,51 @@ const RiwayatPenjualanPage = () => {
       );
       setSaleDetail(detail as SaleDetail);
     } catch (error) {
-      console.error('Error fetching sale detail:', error);
-      toast.error('Gagal memuat detail penjualan');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat detail penjualan';
+      toast.error(errorMessage);
+    }
+  };
+
+  const handlePrintNota = async (sale: UnifiedSale) => {
+    try {
+      if (sale.source_type !== 'kop_penjualan') {
+        toast.error('Cetak nota hanya tersedia untuk penjualan koperasi');
+        return;
+      }
+
+      const detail = await koperasiService.getSalesDetailWithProfitSharing(
+        sale.sale_id,
+        'kop_penjualan'
+      );
+      
+      const penjualanHeader = await koperasiService.getPenjualanById(sale.sale_id);
+      
+      if (detail && penjualanHeader) {
+        setReceiptData({
+          penjualan: {
+            id: sale.sale_id,
+            nomor_struk: penjualanHeader.nomor_struk || penjualanHeader.no_penjualan,
+            tanggal: penjualanHeader.tanggal,
+            kasir_name: penjualanHeader.nama_kasir || 'Admin',
+            metode_pembayaran: penjualanHeader.metode_pembayaran,
+            total_transaksi: penjualanHeader.total_transaksi || penjualanHeader.total,
+            jumlah_bayar: penjualanHeader.jumlah_bayar,
+            kembalian: penjualanHeader.kembalian,
+          },
+          items: detail.items.map(item => ({
+            id: item.id,
+            nama_barang: item.nama_barang,
+            jumlah: item.jumlah,
+            satuan: item.satuan,
+            harga_satuan_jual: item.harga_satuan_jual || item.harga_satuan || 0,
+            subtotal: item.subtotal || item.harga_total || 0,
+          })),
+        });
+        setShowReceipt(true);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data nota';
+      toast.error(errorMessage);
     }
   };
 
@@ -214,23 +284,38 @@ const RiwayatPenjualanPage = () => {
       // Delete based on source type
       const { supabase } = await import('@/integrations/supabase/client');
       
-      if (sale.source_type === 'kop_penjualan') {
-        // Use service function for proper deletion with stock restoration
-        await koperasiService.deletePenjualan(sale.sale_id);
-      } else if (sale.source_type === 'penjualan_header') {
-        // Delete penjualan_header (cascade will delete items and transaksi_inventaris)
-        const { error } = await supabase
-          .from('penjualan_header')
-          .delete()
-          .eq('id', sale.sale_id);
-        if (error) throw error;
-      } else {
-        // Delete transaksi_inventaris (trigger will restore stock)
-        const { error } = await supabase
-          .from('transaksi_inventaris')
-          .delete()
-          .eq('id', sale.sale_id);
-        if (error) throw error;
+      try {
+        if (sale.source_type === 'kop_penjualan') {
+          // Use service function for proper deletion with stock restoration
+          // sale_id is already UUID from kop_penjualan.id
+          await koperasiService.deletePenjualan(sale.sale_id);
+        } else if (sale.source_type === 'penjualan_header') {
+          // Delete penjualan_header (cascade will delete items and transaksi_inventaris)
+          const { error } = await supabase
+            .from('penjualan_header')
+            .delete()
+            .eq('id', sale.sale_id);
+          if (error) {
+            throw new Error(`Gagal menghapus penjualan: ${error.message}`);
+          }
+        } else if (sale.source_type === 'transaksi_inventaris') {
+          // Delete transaksi_inventaris (trigger will restore stock)
+          const { error } = await supabase
+            .from('transaksi_inventaris')
+            .delete()
+            .eq('id', sale.sale_id);
+          if (error) {
+            throw new Error(`Gagal menghapus transaksi: ${error.message}`);
+          }
+        } else {
+          throw new Error(`Tipe sumber tidak dikenal: ${sale.source_type}`);
+        }
+      } catch (error) {
+        // Provide more detailed error message
+        if (error instanceof Error) {
+          throw error;
+        }
+        throw new Error('Gagal menghapus penjualan. Silakan coba lagi.');
       }
     },
     onSuccess: () => {
@@ -238,6 +323,7 @@ const RiwayatPenjualanPage = () => {
       // Invalidate sales queries
       queryClient.invalidateQueries({ queryKey: ['unified-sales-history'] });
       queryClient.invalidateQueries({ queryKey: ['sales-summary-liabilities'] });
+      queryClient.invalidateQueries({ queryKey: ['sales-analytics'] });
       // Invalidate keuangan koperasi queries (karena cascade delete sudah menghapus entri keuangan)
       // Invalidate semua query yang mungkin terkait dengan keuangan koperasi
       queryClient.invalidateQueries({ queryKey: ['keuangan-koperasi'] });
@@ -251,8 +337,11 @@ const RiwayatPenjualanPage = () => {
       setShowDeleteConfirm(false);
       setSaleToDelete(null);
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Gagal menghapus penjualan');
+    onError: (error: Error) => {
+      const errorMessage = error?.message || 'Gagal menghapus penjualan';
+      toast.error(errorMessage, {
+        duration: TOAST_DURATION.MEDIUM,
+      });
     },
   });
 
@@ -262,13 +351,6 @@ const RiwayatPenjualanPage = () => {
     }
   };
 
-  const formatRupiah = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
 
   const getSourceTypeLabel = (type: string) => {
     switch (type) {
@@ -443,6 +525,7 @@ const RiwayatPenjualanPage = () => {
                 <TableRow>
                   <TableHead>Tanggal</TableHead>
                   <TableHead>Customer</TableHead>
+                  <TableHead>Item Terjual</TableHead>
                   <TableHead>Tipe</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead className="text-right">Aksi</TableHead>
@@ -455,6 +538,11 @@ const RiwayatPenjualanPage = () => {
                       {format(new Date(sale.tanggal), 'dd MMM yyyy', { locale: id })}
                     </TableCell>
                     <TableCell>{sale.customer_name || '-'}</TableCell>
+                    <TableCell className="max-w-xs">
+                      <div className="text-sm text-gray-700 truncate" title={sale.items_summary || '-'}>
+                        {sale.items_summary || '-'}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge className={getSourceTypeColor(sale.source_type)}>
                         {getSourceTypeLabel(sale.source_type)}
@@ -465,10 +553,22 @@ const RiwayatPenjualanPage = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        {sale.source_type === 'kop_penjualan' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handlePrintNota(sale)}
+                            title="Cetak Nota"
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleViewDetail(sale)}
+                          title="Lihat Detail"
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
@@ -476,6 +576,7 @@ const RiwayatPenjualanPage = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleEdit(sale)}
+                          title="Edit"
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
@@ -483,9 +584,15 @@ const RiwayatPenjualanPage = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(sale)}
-                          className="text-red-600 hover:text-red-700"
+                          disabled={deleteMutation.isPending}
+                          className="text-red-600 hover:text-red-700 disabled:opacity-50"
+                          title="Hapus penjualan"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {deleteMutation.isPending && saleToDelete?.sale_id === sale.sale_id ? (
+                            <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
                         </Button>
                       </div>
                     </TableCell>
@@ -499,118 +606,107 @@ const RiwayatPenjualanPage = () => {
         </TabsContent>
       </Tabs>
 
-      {/* Detail Dialog */}
+      {/* Detail Dialog - Tampilan Struk/Kwitansi */}
       <Dialog open={showDetail} onOpenChange={setShowDetail}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Detail Penjualan</DialogTitle>
-          </DialogHeader>
-          
-          {selectedSale && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-gray-600">Tanggal</p>
-                  <p className="font-medium">
-                    {format(new Date(selectedSale.tanggal), 'dd MMMM yyyy', { locale: id })}
-                  </p>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <VisuallyHidden asChild>
+            <DialogTitle>Detail Penjualan - Struk</DialogTitle>
+          </VisuallyHidden>
+          {selectedSale && saleDetail && (
+            <div className="bg-white">
+              {/* Header Struk */}
+              <div className="text-center border-b-2 border-dashed border-gray-300 pb-4 mb-4">
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">SANTRA MART</h2>
+                <p className="text-sm text-gray-600">Koperasi Pesantren Anak Yatim Al-Bisri</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {selectedSale.source_type === 'kop_penjualan' 
+                    ? (selectedSale.nomor_struk ? `No. ${selectedSale.nomor_struk}` : `No. ${selectedSale.sale_id.slice(0, 8).toUpperCase()}`)
+                    : (selectedSale.customer_name?.includes('PJ-') 
+                      ? selectedSale.customer_name 
+                      : `No. ${selectedSale.sale_id.slice(0, 8).toUpperCase()}`)}
+                </p>
+              </div>
+
+              {/* Info Transaksi */}
+              <div className="space-y-2 mb-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Tanggal:</span>
+                  <span className="font-medium">
+                    {format(new Date(selectedSale.tanggal), 'dd MMMM yyyy, HH:mm', { locale: id })}
+                  </span>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600">Customer</p>
-                  <p className="font-medium">{selectedSale.customer_name || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Tipe</p>
-                  <Badge className={getSourceTypeColor(selectedSale.source_type)}>
-                    {getSourceTypeLabel(selectedSale.source_type)}
-                  </Badge>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Total</p>
-                  <p className="font-medium text-lg">
-                    {formatRupiah(Number(selectedSale.total_amount || 0))}
-                  </p>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Metode Pembayaran:</span>
+                  <span className="font-medium capitalize">{selectedSale.customer_name || 'Cash'}</span>
                 </div>
               </div>
 
-              {saleDetail && (
-                <>
-                  <div className="border-t pt-4">
-                    <h3 className="font-semibold mb-3">Item Penjualan</h3>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Barang</TableHead>
-                          <TableHead className="text-right">Jumlah</TableHead>
-                          <TableHead className="text-right">Harga</TableHead>
-                          <TableHead className="text-right">HPP</TableHead>
-                          <TableHead className="text-right">Profit</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {saleDetail.items.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell>{item.nama_barang}</TableCell>
-                            <TableCell className="text-right">
-                              {item.jumlah} {item.satuan}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatRupiah(
-                                Number(item.subtotal || item.harga_total || item.harga_satuan_jual || 0)
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatRupiah(Number(item.hpp || 0) * item.jumlah)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatRupiah(Number(item.profit || 0))}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  <div className="border-t pt-4">
-                    <h3 className="font-semibold mb-3">Rincian Penjualan</h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm">Total Revenue</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-2xl font-bold">
-                            {formatRupiah(saleDetail.summary.total_revenue)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm">Total HPP</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-2xl font-bold text-red-600">
-                            {formatRupiah(saleDetail.summary.total_hpp)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-gradient-to-br from-green-50/80 to-green-100/50 border-2 border-green-200/50">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2 text-green-800">
-                            <Store className="w-4 h-4" />
-                            Total Penjualan
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-2xl font-bold text-green-900">
-                            {formatRupiah(saleDetail.summary.total_revenue)}
-                          </p>
-                        </CardContent>
-                      </Card>
+              {/* Daftar Item */}
+              <div className="border-t border-b border-gray-200 py-3 mb-4">
+                <div className="space-y-2">
+                  {saleDetail.items.map((item, index) => (
+                    <div key={item.id || index} className="flex justify-between items-start text-sm">
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900">{item.nama_barang}</p>
+                        <p className="text-xs text-gray-500">
+                          {item.jumlah} {item.satuan || 'pcs'} × {formatRupiah(Number(item.harga_satuan_jual || item.harga_satuan || 0))}
+                        </p>
+                      </div>
+                      <div className="text-right ml-4">
+                        <p className="font-medium text-gray-900">
+                          {formatRupiah(Number(item.subtotal || item.harga_total || 0))}
+                        </p>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rincian Total */}
+              <div className="space-y-2 mb-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Subtotal:</span>
+                  <span className="font-medium">
+                    {formatRupiah(saleDetail.summary.total_revenue)}
+                  </span>
+                </div>
+                {saleDetail.summary.total_hpp > 0 && (
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>HPP:</span>
+                    <span>{formatRupiah(saleDetail.summary.total_hpp)}</span>
                   </div>
-                </>
-              )}
+                )}
+                {saleDetail.summary.total_profit > 0 && (
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Profit:</span>
+                    <span>{formatRupiah(saleDetail.summary.total_profit)}</span>
+                  </div>
+                )}
+                <div className="border-t border-gray-200 pt-2 mt-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-bold text-gray-900">TOTAL:</span>
+                    <span className="text-lg font-bold text-emerald-600">
+                      {formatRupiah(Number(selectedSale.total_amount || saleDetail.summary.total_revenue))}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Struk */}
+              <div className="border-t-2 border-dashed border-gray-300 pt-4 mt-4 text-center">
+                <p className="text-xs text-gray-500">Terima kasih atas kunjungan Anda</p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 mt-4 pt-4 border-t">
+                <Button
+                  variant="default"
+                  onClick={() => setShowDetail(false)}
+                  className="flex-1"
+                >
+                  Tutup
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
@@ -630,29 +726,74 @@ const RiwayatPenjualanPage = () => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Hapus Penjualan?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Apakah Anda yakin ingin menghapus penjualan ini? Tindakan ini tidak dapat dibatalkan.
-              {saleToDelete && (
-                <div className="mt-2 p-2 bg-gray-50 rounded">
-                  <p className="text-sm font-medium">{saleToDelete.customer_name}</p>
-                  <p className="text-xs text-gray-600">
-                    {format(new Date(saleToDelete.tanggal), 'dd MMMM yyyy', { locale: id })} - {formatRupiah(Number(saleToDelete.total_amount || 0))}
-                  </p>
-                </div>
-              )}
+            <AlertDialogDescription asChild>
+              <div>
+                <p>Apakah Anda yakin ingin menghapus penjualan ini? Tindakan ini tidak dapat dibatalkan.</p>
+                {saleToDelete && (
+                  <div className="mt-2 p-2 bg-gray-50 rounded">
+                    <p className="text-sm font-medium">{saleToDelete.customer_name}</p>
+                    <p className="text-xs text-gray-600">
+                      {format(new Date(saleToDelete.tanggal), 'dd MMMM yyyy', { locale: id })} - {formatRupiah(Number(saleToDelete.total_amount || 0))}
+                    </p>
+                  </div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>
+              Batal
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
-              className="bg-red-600 hover:bg-red-700"
+              disabled={deleteMutation.isPending}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
             >
-              Hapus
+              {deleteMutation.isPending ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                  Menghapus...
+                </>
+              ) : (
+                'Hapus'
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Receipt Print Dialog */}
+      {showReceipt && receiptData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-semibold">Nota Penjualan</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowReceipt(false);
+                  setReceiptData(null);
+                }}
+              >
+                Tutup
+              </Button>
+            </div>
+            <div className="p-4">
+              <ReceiptNota
+                penjualan={receiptData.penjualan}
+                items={receiptData.items}
+                autoPrint={false}
+                showActions={true}
+                onClose={() => {
+                  setShowReceipt(false);
+                  setReceiptData(null);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

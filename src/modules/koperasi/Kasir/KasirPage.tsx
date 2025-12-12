@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, Trash2, DollarSign, Building2, School } from "lucide-react";
+import { ShoppingCart, Trash2, DollarSign, Plus, Minus } from "lucide-react";
 import { koperasiService } from "@/services/koperasi.service";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -14,11 +15,15 @@ import PaymentDialog from "./components/PaymentDialog";
 import type { KasirCartItem, ProfitSharing } from "@/types/koperasi.types";
 
 export default function KasirPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [cart, setCart] = useState<KasirCartItem[]>([]);
-  const [activeShift, setActiveShift] = useState<any>(null);
+  const [activeShift, setActiveShift] = useState<{ id: string; [key: string]: unknown } | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const [simpleMode, setSimpleMode] = useState(true); // Mode sederhana tanpa shift
+  const [editingPenjualanId, setEditingPenjualanId] = useState<string | null>(null);
+  const [isLoadingEditData, setIsLoadingEditData] = useState(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -32,6 +37,112 @@ export default function KasirPage() {
     });
   }, [simpleMode]);
 
+  // Load penjualan untuk edit mode
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId && editId !== editingPenjualanId) {
+      loadPenjualanForEdit(editId);
+    } else if (!editId && editingPenjualanId) {
+      // Clear edit mode jika parameter edit dihapus
+      // Reverse restore stock jika user cancel edit tanpa checkout
+      handleCancelEdit();
+    }
+  }, [searchParams]);
+
+  const handleCancelEdit = async () => {
+    if (editingPenjualanId) {
+      try {
+        // Reverse restore stock to maintain accuracy
+        await koperasiService.reverseRestoreStockForEdit(editingPenjualanId);
+      } catch (error) {
+        // Silent fail for cleanup operation - stock will be corrected on next transaction
+        // Log only in development
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.warn('Error reversing stock during edit cancel (non-critical):', error);
+        }
+      }
+      setEditingPenjualanId(null);
+      setCart([]);
+      queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active-with-stock'] });
+    }
+  };
+
+  const loadPenjualanForEdit = async (penjualanId: string) => {
+    setIsLoadingEditData(true);
+    try {
+      // Step 1: Restore stock first (this allows user to edit without stock validation issues)
+      await koperasiService.restoreStockForEdit(penjualanId);
+
+      // Step 2: Fetch detail penjualan dengan semua item
+      const detail = await koperasiService.getSalesDetailWithProfitSharing(
+        penjualanId,
+        'kop_penjualan'
+      );
+
+      if (!detail || !detail.items || detail.items.length === 0) {
+        toast.error('Data penjualan tidak ditemukan atau tidak memiliki item');
+        navigate('/koperasi/kasir');
+        return;
+      }
+
+      // Step 3: Refresh produk list untuk mendapatkan stok yang sudah di-restore
+      await queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active-with-stock'] });
+      await queryClient.refetchQueries({ queryKey: ['koperasi-produk-active-with-stock'] });
+
+      // Convert items ke format cart
+      const cartItems: KasirCartItem[] = [];
+      
+      for (const item of detail.items) {
+        // Fetch produk untuk mendapatkan data lengkap (dengan stok yang sudah di-restore)
+        const produk = await koperasiService.getProdukById(item.item_id);
+        if (!produk) {
+          toast.warning(`Produk ${item.nama_barang} tidak ditemukan dan akan dilewati`);
+          continue;
+        }
+
+        // Tentukan price_type berdasarkan harga
+        const hargaEcer = produk.harga_jual_ecer || produk.harga_jual || 0;
+        const hargaGrosir = produk.harga_jual_grosir || produk.harga_jual || 0;
+        const hargaItem = item.harga_satuan_jual || 0;
+        
+        // Tentukan price_type berdasarkan harga yang paling mendekati
+        const priceType: 'ecer' | 'grosir' = 
+          Math.abs(hargaItem - hargaGrosir) < Math.abs(hargaItem - hargaEcer) 
+            ? 'grosir' 
+            : 'ecer';
+
+        // Get stock real-time (sekarang sudah include stok yang di-restore)
+        const stokTersedia = Math.max(0, Math.floor(produk.stok ?? produk.stock ?? 0));
+
+        cartItems.push({
+          produk_id: produk.id,
+          kode_produk: produk.kode_produk || '',
+          nama_produk: produk.nama_produk || item.nama_barang,
+          satuan: produk.satuan || item.satuan,
+          harga_jual: hargaItem,
+          harga_beli: produk.harga_beli || item.hpp || 0,
+          jumlah: item.jumlah,
+          diskon: 0, // Diskon akan dihitung ulang jika ada
+          subtotal: item.subtotal || (hargaItem * item.jumlah),
+          stock_tersedia: stokTersedia,
+          sumber_modal_id: produk.sumber_modal_id,
+          price_type: priceType,
+        });
+      }
+
+      setCart(cartItems);
+      setEditingPenjualanId(penjualanId);
+      toast.success(`Data penjualan dimuat ke keranjang (${cartItems.length} item). Stok telah dikembalikan.`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data penjualan';
+      toast.error(errorMessage);
+      navigate('/koperasi/kasir');
+    } finally {
+      setIsLoadingEditData(false);
+    }
+  };
+
   const loadActiveShift = async (kasirId: string) => {
     const shift = await koperasiService.getActiveShift(kasirId);
     setActiveShift(shift);
@@ -42,75 +153,128 @@ export default function KasirPage() {
     queryFn: () => koperasiService.getProduk({ is_active: true, min_stock: 1 }),
   });
 
-  const addToCart = (produkId: string, priceType: 'ecer' | 'grosir' = 'ecer') => {
-    const produk = produkList.find(p => p.id === produkId);
-    if (!produk) {
+  const addToCart = async (produkId: string, priceType: 'ecer' | 'grosir' = 'ecer') => {
+    // Ambil stok real-time dari database untuk memastikan data terbaru
+    const produkRealTime = await koperasiService.getProdukById(produkId);
+    if (!produkRealTime) {
       toast.error('Produk tidak ditemukan');
       return;
     }
 
-    // Get stock from produk object directly (already filtered to have stock > 0)
-    const stokTersedia = produk.stok ?? produk.stock ?? 0;
+    // Get stock real-time - validasi ketat
+    const stokTersedia = Math.max(0, Math.floor(produkRealTime.stok ?? produkRealTime.stock ?? 0));
     
-    // Double-check: if stock is 0 or less, don't allow adding to cart
+    // Validasi: stok harus > 0 untuk bisa ditambahkan
     if (stokTersedia <= 0) {
-      toast.error('Stock habis');
+      toast.error(`Stok ${produkRealTime.nama_produk} habis. Tidak bisa ditambahkan ke keranjang.`);
+      // Refresh produk list untuk update UI
+      queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active-with-stock'] });
       return;
     }
 
     // Tentukan harga berdasarkan priceType
     const hargaJual = priceType === 'grosir' 
-      ? (produk.harga_jual_grosir || produk.harga_jual_ecer || produk.harga_jual || 0)
-      : (produk.harga_jual_ecer || produk.harga_jual || 0);
+      ? (produkRealTime.harga_jual_grosir || produkRealTime.harga_jual_ecer || produkRealTime.harga_jual || 0)
+      : (produkRealTime.harga_jual_ecer || produkRealTime.harga_jual || 0);
 
     const existingItem = cart.find(item => 
       item.produk_id === produkId && item.price_type === priceType
     );
     
     if (existingItem) {
-      if (stokTersedia > 0 && existingItem.jumlah + 1 > stokTersedia) {
-        toast.error('Stock tidak mencukupi');
+      // Hitung total jumlah yang sudah ada di cart untuk produk ini (semua price_type)
+      const totalJumlahDiCart = cart
+        .filter(item => item.produk_id === produkId)
+        .reduce((sum, item) => sum + item.jumlah, 0);
+      
+      // Validasi: total jumlah di cart + 1 tidak boleh melebihi stok tersedia
+      if (totalJumlahDiCart + 1 > stokTersedia) {
+        toast.error(`Stok ${produkRealTime.nama_produk} tidak mencukupi. Stok tersedia: ${stokTersedia}, Sudah di cart: ${totalJumlahDiCart}`);
         return;
       }
-      updateCartItem(produkId, existingItem.jumlah + 1, priceType);
-      toast.success(`${produk.nama_produk} ditambahkan ke keranjang`);
+      
+      // Update stok tersedia di item yang ada
+      updateCartItem(produkId, existingItem.jumlah + 1, priceType, stokTersedia);
+      toast.success(`${produkRealTime.nama_produk} ditambahkan ke keranjang`);
     } else {
-      if (stokTersedia <= 0 && stokTersedia !== null && stokTersedia !== undefined) {
-        toast.error('Stock habis');
+      // Item baru: pastikan stok > 0
+      if (stokTersedia <= 0) {
+        toast.error(`Stok ${produkRealTime.nama_produk} habis. Tidak bisa ditambahkan ke keranjang.`);
+        queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active-with-stock'] });
+        return;
+      }
+      
+      // Cek total jumlah di cart untuk produk ini
+      const totalJumlahDiCart = cart
+        .filter(item => item.produk_id === produkId)
+        .reduce((sum, item) => sum + item.jumlah, 0);
+      
+      if (totalJumlahDiCart + 1 > stokTersedia) {
+        toast.error(`Stok ${produkRealTime.nama_produk} tidak mencukupi. Stok tersedia: ${stokTersedia}, Sudah di cart: ${totalJumlahDiCart}`);
         return;
       }
       
       const newItem: KasirCartItem = {
-        produk_id: produk.id,
-        kode_produk: produk.kode_produk,
-        nama_produk: produk.nama_produk,
-        satuan: produk.satuan,
+        produk_id: produkRealTime.id,
+        kode_produk: produkRealTime.kode_produk,
+        nama_produk: produkRealTime.nama_produk,
+        satuan: produkRealTime.satuan,
         harga_jual: hargaJual,
-        harga_beli: produk.harga_beli,
+        harga_beli: produkRealTime.harga_beli,
         jumlah: 1,
         diskon: 0,
         subtotal: hargaJual,
         stock_tersedia: stokTersedia,
-        sumber_modal_id: produk.sumber_modal_id,
+        sumber_modal_id: produkRealTime.sumber_modal_id,
         price_type: priceType,
       };
       setCart([...cart, newItem]);
-      toast.success(`${produk.nama_produk} ditambahkan ke keranjang`);
+      toast.success(`${produkRealTime.nama_produk} ditambahkan ke keranjang`);
     }
   };
 
-  const updateCartItem = (produkId: string, jumlah: number, priceType?: 'ecer' | 'grosir') => {
+  const updateCartItem = async (produkId: string, jumlah: number, priceType?: 'ecer' | 'grosir', stokTersediaOverride?: number) => {
+    // Ambil stok real-time jika tidak ada override
+    let stokRealTime = stokTersediaOverride;
+    if (stokRealTime === undefined) {
+      const produk = await koperasiService.getProdukById(produkId);
+      stokRealTime = produk ? Math.max(0, Math.floor(produk.stok ?? produk.stock ?? 0)) : 0;
+    }
+    
     setCart(cart.map(item => {
       if (item.produk_id === produkId && (!priceType || item.price_type === priceType)) {
-        const newJumlah = Math.max(0, jumlah);
+        // Hitung total jumlah yang sudah ada di cart untuk produk ini (semua price_type)
+        const totalJumlahDiCartLainnya = cart
+          .filter(i => i.produk_id === produkId && !(i.produk_id === item.produk_id && i.price_type === item.price_type))
+          .reduce((sum, i) => sum + i.jumlah, 0);
+        
+        // Validasi: jumlah harus valid number, tidak boleh NaN atau negatif
+        // Boleh set 0 untuk reset quantity
+        const validJumlah = isNaN(jumlah) || jumlah < 0 ? 0 : Math.floor(jumlah);
+        // Maksimal jumlah = stok tersedia - jumlah yang sudah ada di cart lainnya
+        const maxJumlah = Math.max(0, stokRealTime - totalJumlahDiCartLainnya);
+        // Clamp jumlah antara 0 dan maxJumlah
+        const newJumlah = Math.max(0, Math.min(validJumlah, maxJumlah));
+        
+        // Jika jumlah melebihi stok, tampilkan error (hanya jika user input lebih dari max)
+        if (validJumlah > maxJumlah && maxJumlah > 0) {
+          toast.error(`Stok ${item.nama_produk} tidak mencukupi. Stok tersedia: ${stokRealTime}, Sudah di cart: ${totalJumlahDiCartLainnya}, Maksimal: ${maxJumlah}`);
+        }
+        
+        // Validasi harga dan diskon
+        const hargaJual = item.harga_jual || 0;
+        const diskon = item.diskon || 0;
+        const newSubtotal = Math.max(0, (newJumlah * hargaJual) - diskon);
+        
         return {
           ...item,
           jumlah: newJumlah,
-          subtotal: (newJumlah * item.harga_jual) - item.diskon,
+          subtotal: newSubtotal,
+          stock_tersedia: stokRealTime, // Update stok tersedia dengan data real-time
         };
       }
       return item;
-    }).filter(item => item.jumlah > 0));
+    }).filter(item => item.jumlah > 0)); // Hapus item dengan jumlah 0 dari cart
   };
 
   const switchPriceType = (produkId: string, currentPriceType: 'ecer' | 'grosir') => {
@@ -119,37 +283,84 @@ export default function KasirPage() {
 
     const newPriceType = currentPriceType === 'ecer' ? 'grosir' : 'ecer';
     const newHarga = newPriceType === 'grosir'
-      ? (produk.harga_jual_grosir || produk.harga_jual_ecer || 0)
+      ? (produk.harga_jual_grosir || produk.harga_jual_ecer || produk.harga_jual || 0)
       : (produk.harga_jual_ecer || produk.harga_jual || 0);
 
+    // Cek apakah sudah ada item dengan price_type yang baru
+    const existingNewPriceItem = cart.find(item => 
+      item.produk_id === produkId && item.price_type === newPriceType
+    );
+
+    if (existingNewPriceItem) {
+      // Jika sudah ada, update jumlah item yang baru (tambah dengan jumlah item lama)
+      setCart(cart.map(item => {
+        if (item.produk_id === produkId && item.price_type === newPriceType) {
+          const currentItem = cart.find(i => i.produk_id === produkId && i.price_type === currentPriceType);
+          const jumlahBaru = item.jumlah + (currentItem?.jumlah || 0);
+          const diskon = item.diskon || 0;
+          const newSubtotal = Math.max(0, (jumlahBaru * newHarga) - diskon);
+          
+          return {
+            ...item,
+            jumlah: jumlahBaru,
+            subtotal: newSubtotal,
+          };
+        }
+        // Hapus item dengan price_type lama
+        if (item.produk_id === produkId && item.price_type === currentPriceType) {
+          return null;
+        }
+        return item;
+      }).filter(Boolean) as KasirCartItem[]);
+    } else {
+      // Jika belum ada, ubah price_type item yang ada
+      setCart(cart.map(item => {
+        if (item.produk_id === produkId && item.price_type === currentPriceType) {
+          const jumlah = item.jumlah || 0;
+          const diskon = item.diskon || 0;
+          const newSubtotal = Math.max(0, (jumlah * newHarga) - diskon);
+          
+          return {
+            ...item,
+            harga_jual: newHarga,
+            price_type: newPriceType,
+            subtotal: newSubtotal,
+          };
+        }
+        return item;
+      }));
+    }
+  };
+
+  const updateDiskon = (produkId: string, diskon: number, priceType?: 'ecer' | 'grosir') => {
     setCart(cart.map(item => {
-      if (item.produk_id === produkId && item.price_type === currentPriceType) {
+      if (item.produk_id === produkId && (!priceType || item.price_type === priceType)) {
+        // Validasi diskon: tidak boleh NaN, negatif, atau lebih besar dari subtotal
+        const validDiskon = isNaN(diskon) || diskon < 0 ? 0 : diskon;
+        const hargaJual = item.harga_jual || 0;
+        const jumlah = item.jumlah || 0;
+        const maxDiskon = jumlah * hargaJual; // Diskon tidak boleh lebih besar dari subtotal sebelum diskon
+        const finalDiskon = Math.min(validDiskon, maxDiskon);
+        const newSubtotal = Math.max(0, (jumlah * hargaJual) - finalDiskon);
+        
         return {
           ...item,
-          harga_jual: newHarga,
-          price_type: newPriceType,
-          subtotal: (item.jumlah * newHarga) - item.diskon,
+          diskon: finalDiskon,
+          subtotal: newSubtotal,
         };
       }
       return item;
     }));
   };
 
-  const updateDiskon = (produkId: string, diskon: number) => {
-    setCart(cart.map(item => {
-      if (item.produk_id === produkId) {
-        return {
-          ...item,
-          diskon: Math.max(0, diskon),
-          subtotal: (item.jumlah * item.harga_jual) - Math.max(0, diskon),
-        };
-      }
-      return item;
-    }));
-  };
-
-  const removeFromCart = (produkId: string) => {
-    setCart(cart.filter(item => item.produk_id !== produkId));
+  const removeFromCart = (produkId: string, priceType?: 'ecer' | 'grosir') => {
+    if (priceType) {
+      // Hapus item dengan produk_id dan price_type yang spesifik
+      setCart(cart.filter(item => !(item.produk_id === produkId && item.price_type === priceType)));
+    } else {
+      // Jika tidak ada price_type, hapus semua item dengan produk_id tersebut
+      setCart(cart.filter(item => item.produk_id !== produkId));
+    }
   };
 
   const clearCart = () => {
@@ -183,9 +394,16 @@ export default function KasirPage() {
     };
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.jumlah * item.harga_jual), 0);
-  const totalDiskon = cart.reduce((sum, item) => sum + item.diskon, 0);
-  const total = subtotal - totalDiskon;
+  // Perhitungan subtotal dan total dengan validasi
+  const subtotal = cart.reduce((sum, item) => {
+    const itemSubtotal = (item.jumlah || 0) * (item.harga_jual || 0);
+    return sum + (isNaN(itemSubtotal) ? 0 : itemSubtotal);
+  }, 0);
+  const totalDiskon = cart.reduce((sum, item) => {
+    const diskon = item.diskon || 0;
+    return sum + (isNaN(diskon) ? 0 : diskon);
+  }, 0);
+  const total = Math.max(0, subtotal - totalDiskon); // Pastikan total tidak negatif
 
   // Profit sharing calculation is still used internally for payment processing
   // but not displayed in the UI (removed for cashier simplicity)
@@ -195,8 +413,10 @@ export default function KasirPage() {
       toast.error('Keranjang kosong');
       return;
     }
+    // Di simpleMode, tidak perlu shift
+    // Hanya validasi shift jika tidak dalam simpleMode
     if (!simpleMode && !activeShift) {
-      toast.error('Shift belum dibuka');
+      toast.error('Shift belum dibuka. Silakan buka shift terlebih dahulu atau aktifkan Mode Sederhana');
       return;
     }
     setPaymentDialogOpen(true);
@@ -204,8 +424,14 @@ export default function KasirPage() {
 
   const handlePaymentSuccess = () => {
     clearCart();
+    if (editingPenjualanId) {
+      setEditingPenjualanId(null);
+      setSearchParams({});
+      navigate('/koperasi/kasir');
+    }
     queryClient.invalidateQueries({ queryKey: ['koperasi-produk-active-with-stock'] });
     queryClient.invalidateQueries({ queryKey: ['koperasi-penjualan'] });
+    queryClient.invalidateQueries({ queryKey: ['unified-sales-history'] });
   };
 
   // Mode sederhana: langsung tampilkan kasir tanpa shift
@@ -268,6 +494,11 @@ export default function KasirPage() {
                       {cart.length} item
                     </Badge>
                   )}
+                  {editingPenjualanId && (
+                    <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700 border-yellow-300">
+                      Mode Edit
+                    </Badge>
+                  )}
                 </div>
               </CardTitle>
             </CardHeader>
@@ -284,97 +515,166 @@ export default function KasirPage() {
                 <>
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                     {cart.map((item, index) => {
-                      const profitSharing = calculateItemProfitSharing(item);
-                      const isYayasanProduct = profitSharing.owner_type === 'yayasan';
+                      // Generate unique key untuk item dengan price_type yang berbeda
+                      const itemKey = `${item.produk_id}-${item.price_type || 'ecer'}-${index}`;
+                      const produk = produkList.find(p => p.id === item.produk_id);
+                      const hasEcer = (produk?.harga_jual_ecer || produk?.harga_jual || 0) > 0;
+                      const hasGrosir = (produk?.harga_jual_grosir || 0) > 0;
+                      const hasBothPrices = hasEcer && hasGrosir && 
+                        produk.harga_jual_grosir !== produk.harga_jual_ecer;
+                      const currentPriceType = item.price_type || 'ecer';
+                      
+                      // Hitung maksimal jumlah yang bisa diinput (stok tersedia - jumlah di cart lainnya untuk produk yang sama)
+                      const totalJumlahDiCartLainnya = cart
+                        .filter(i => i.produk_id === item.produk_id && !(i.produk_id === item.produk_id && i.price_type === item.price_type))
+                        .reduce((sum, i) => sum + i.jumlah, 0);
+                      const maxJumlahInput = Math.max(0, item.stock_tersedia - totalJumlahDiCartLainnya);
                       
                       return (
                         <div 
-                          key={item.produk_id}
+                          key={itemKey}
                           className="transition-all duration-300 ease-out"
                           style={{ 
                             animationDelay: `${index * 50}ms`
                           }}
                         >
                           <div 
-                            className={`group relative rounded-xl p-4 space-y-3 transition-all duration-200 ${
-                              isYayasanProduct 
-                                ? 'bg-gradient-to-br from-blue-50/80 to-blue-100/50 border-2 border-blue-200/50' 
-                                : 'bg-gradient-to-br from-green-50/80 to-green-100/50 border-2 border-green-200/50'
-                            } hover:shadow-lg hover:scale-[1.02]`}
+                            className="group relative rounded-xl p-4 space-y-3 transition-all duration-200 bg-gradient-to-br from-card to-card/80 border-2 border-border/50 hover:shadow-lg hover:scale-[1.01]"
                           >
                             <div className="flex justify-between items-start gap-3">
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                                   <h4 className="font-semibold text-base truncate">{item.nama_produk}</h4>
-                                  {isYayasanProduct ? (
-                                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 border-blue-300 shrink-0">
-                                      <School className="w-3 h-3 mr-1" />
-                                      Yayasan
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 border-green-300 shrink-0">
-                                      <Building2 className="w-3 h-3 mr-1" />
-                                      Koperasi
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 mb-3">
-                                  <p className="text-sm text-muted-foreground">
-                                    Rp {item.harga_jual.toLocaleString('id-ID')} / {item.satuan}
-                                  </p>
-                                  <Badge variant="outline" className="text-xs">
-                                    {item.price_type === 'grosir' ? 'Grosir' : 'Ecer'}
+                                  <Badge variant="outline" className="text-xs font-mono">
+                                    {item.kode_produk}
                                   </Badge>
-                                  {(() => {
-                                    const produk = produkList.find(p => p.id === item.produk_id);
-                                    const hasBothPrices = produk && produk.harga_jual_grosir && 
-                                      produk.harga_jual_grosir !== produk.harga_jual_ecer;
-                                    if (hasBothPrices) {
-                                      return (
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          className="h-6 text-xs px-2"
-                                          onClick={() => switchPriceType(item.produk_id, item.price_type || 'ecer')}
-                                        >
-                                          Switch ke {item.price_type === 'grosir' ? 'Ecer' : 'Grosir'}
-                                        </Button>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
                                 </div>
                                 
-                                <div className="flex gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <label className="text-xs text-muted-foreground">Qty:</label>
+                                {/* Toggle Harga Ecer/Grosir */}
+                                {hasBothPrices && (
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <span className="text-xs text-muted-foreground">Harga:</span>
+                                    <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
+                                      <Button
+                                        size="sm"
+                                        variant={currentPriceType === 'ecer' ? 'default' : 'ghost'}
+                                        className={`h-7 text-xs px-3 transition-all ${
+                                          currentPriceType === 'ecer' 
+                                            ? 'bg-primary text-primary-foreground shadow-sm' 
+                                            : 'hover:bg-muted'
+                                        }`}
+                                        onClick={() => switchPriceType(item.produk_id, currentPriceType)}
+                                      >
+                                        Ecer
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant={currentPriceType === 'grosir' ? 'default' : 'ghost'}
+                                        className={`h-7 text-xs px-3 transition-all ${
+                                          currentPriceType === 'grosir' 
+                                            ? 'bg-primary text-primary-foreground shadow-sm' 
+                                            : 'hover:bg-muted'
+                                        }`}
+                                        onClick={() => switchPriceType(item.produk_id, currentPriceType)}
+                                      >
+                                        Grosir
+                                      </Button>
+                                    </div>
+                                    <span className="text-sm font-medium text-foreground">
+                                      Rp {item.harga_jual.toLocaleString('id-ID')} / {item.satuan}
+                                    </span>
+                                  </div>
+                                )}
+                                
+                                {!hasBothPrices && (
+                                  <p className="text-sm text-muted-foreground mb-3">
+                                    Rp {item.harga_jual.toLocaleString('id-ID')} / {item.satuan}
+                                  </p>
+                                )}
+                                
+                                {/* Qty dengan tombol + dan - */}
+                                <div className="flex items-center gap-3 mb-3">
+                                  <label className="text-xs text-muted-foreground whitespace-nowrap">Qty:</label>
+                                  <div className="flex items-center gap-1 border rounded-lg">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 hover:bg-muted"
+                                      onClick={() => {
+                                        const newJumlah = Math.max(0, item.jumlah - 1);
+                                        updateCartItem(item.produk_id, newJumlah, item.price_type);
+                                      }}
+                                      disabled={item.jumlah <= 0}
+                                      title="Kurangi jumlah"
+                                    >
+                                      <Minus className="w-4 h-4" />
+                                    </Button>
                                     <Input
                                       type="number"
                                       value={item.jumlah}
-                                      onChange={(e) => updateCartItem(item.produk_id, parseFloat(e.target.value))}
-                                      className="w-20 h-9 text-center font-medium"
+                                      onChange={(e) => {
+                                        const inputValue = e.target.value;
+                                        // Allow empty input for better UX
+                                        if (inputValue === '' || inputValue === '-') {
+                                          return; // Don't update yet, let user finish typing
+                                        }
+                                        const newJumlah = parseFloat(inputValue);
+                                        if (!isNaN(newJumlah)) {
+                                          updateCartItem(item.produk_id, newJumlah, item.price_type);
+                                        }
+                                      }}
+                                      onBlur={(e) => {
+                                        // Jika input kosong atau invalid saat blur, set ke 0
+                                        const inputValue = e.target.value;
+                                        if (inputValue === '' || inputValue === '-' || isNaN(parseFloat(inputValue))) {
+                                          updateCartItem(item.produk_id, 0, item.price_type);
+                                        }
+                                      }}
+                                      className="w-16 h-8 text-center font-medium border-0 focus-visible:ring-0 px-1"
                                       min="0"
-                                      max={item.stock_tersedia}
+                                      max={maxJumlahInput}
+                                      step="1"
                                     />
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 hover:bg-muted"
+                                      onClick={() => {
+                                        const newJumlah = item.jumlah + 1;
+                                        updateCartItem(item.produk_id, newJumlah, item.price_type);
+                                      }}
+                                      disabled={item.jumlah >= maxJumlahInput}
+                                      title="Tambah jumlah"
+                                    >
+                                      <Plus className="w-4 h-4" />
+                                    </Button>
                                   </div>
-                                  <div className="flex-1">
-                                    <label className="text-xs text-muted-foreground block mb-1">Diskon:</label>
-                                    <Input
-                                      type="number"
-                                      value={item.diskon}
-                                      onChange={(e) => updateDiskon(item.produk_id, parseFloat(e.target.value))}
-                                      placeholder="0"
-                                      className="h-9 text-sm"
-                                      min="0"
-                                    />
-                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    Stok: {item.stock_tersedia} {totalJumlahDiCartLainnya > 0 && `(Maks: ${maxJumlahInput})`}
+                                  </span>
+                                </div>
+                                
+                                {/* Diskon */}
+                                <div className="flex items-center gap-2">
+                                  <label className="text-xs text-muted-foreground whitespace-nowrap">Diskon:</label>
+                                  <Input
+                                    type="number"
+                                    value={item.diskon}
+                                    onChange={(e) => updateDiskon(item.produk_id, parseFloat(e.target.value) || 0, item.price_type)}
+                                    placeholder="0"
+                                    className="h-8 text-sm flex-1"
+                                    min="0"
+                                  />
                                 </div>
                               </div>
+                              
+                              {/* Tombol Delete */}
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => removeFromCart(item.produk_id)}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                onClick={() => removeFromCart(item.produk_id, item.price_type)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0 h-8 w-8 p-0"
+                                title="Hapus dari keranjang"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
@@ -436,13 +736,21 @@ export default function KasirPage() {
 
       <PaymentDialog
         open={paymentDialogOpen}
-        onClose={() => setPaymentDialogOpen(false)}
+        onClose={() => {
+          setPaymentDialogOpen(false);
+          // Clear edit mode setelah dialog ditutup (jika tidak berhasil)
+          if (editingPenjualanId) {
+            // Jangan clear jika user hanya menutup dialog tanpa save
+            // Biarkan edit mode tetap aktif
+          }
+        }}
         cart={cart}
         subtotal={subtotal}
         totalDiskon={totalDiskon}
         total={total}
         shiftId={simpleMode ? null : activeShift?.id}
         kasirId={userId}
+        editingPenjualanId={editingPenjualanId}
         onSuccess={handlePaymentSuccess}
       />
     </div>

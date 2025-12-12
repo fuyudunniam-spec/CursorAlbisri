@@ -37,9 +37,9 @@ export default function ProductSelector({ produkList, onSelectProduk }: ProductS
     let filtered = produkList
       // Hanya tampilkan produk yang punya minimal satu harga jual terisi
       .filter((p) => (p.harga_jual_ecer || 0) > 0 || (p.harga_jual_grosir || 0) > 0)
-      // Hanya tampilkan produk yang memiliki stok > 0
+      // Hanya tampilkan produk yang memiliki stok > 0 (validasi ketat)
       .filter((p) => {
-        const stok = p.stok ?? p.stock ?? 0;
+        const stok = Math.max(0, Math.floor(p.stok ?? p.stock ?? 0));
         return stok > 0;
       })
       .filter((p) => {
@@ -192,15 +192,30 @@ export default function ProductSelector({ produkList, onSelectProduk }: ProductS
           <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
             {filteredProduk.map((produk) => {
               const ownerType = produk.owner_type || "koperasi";
+              const stok = produk.stok ?? produk.stock ?? 0;
+              const isStokHabis = stok <= 0;
+              
+              // Tentukan harga default (ecer jika ada, jika tidak grosir)
+              const hasEcer = (produk.harga_jual_ecer || produk.harga_jual || 0) > 0;
+              const hasGrosir = (produk.harga_jual_grosir || 0) > 0;
+              const defaultPriceType = hasEcer ? 'ecer' : (hasGrosir ? 'grosir' : 'ecer');
+              
               return (
                 <div
                   key={produk.id}
-                  className="w-full p-4 rounded-lg border-2 border-border/50 bg-card hover:border-primary/50 hover:bg-primary/5 hover:shadow-md transition-all duration-200 group"
+                  onClick={() => !isStokHabis && onSelectProduk(produk.id, defaultPriceType)}
+                  className={`w-full p-4 rounded-lg border-2 transition-all duration-200 group cursor-pointer ${
+                    isStokHabis 
+                      ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed' 
+                      : 'border-border/50 bg-card hover:border-primary/50 hover:bg-primary/5 hover:shadow-md active:scale-[0.98]'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <h3 className="font-semibold text-base group-hover:text-primary transition-colors truncate">
+                        <h3 className={`font-semibold text-base transition-colors truncate ${
+                          !isStokHabis && 'group-hover:text-primary'
+                        }`}>
                           {produk.nama_produk}
                         </h3>
                         <Badge 
@@ -216,19 +231,28 @@ export default function ProductSelector({ produkList, onSelectProduk }: ProductS
                           {produk.kode_produk}
                         </span>
                         <span className="text-muted-foreground">•</span>
-                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">
-                          Stok: {(produk.stok ?? produk.stock ?? 0).toLocaleString("id-ID")} {produk.satuan}
+                        <Badge 
+                          variant="outline" 
+                          className={`text-xs ${
+                            stok > 0 
+                              ? 'bg-green-50 text-green-700 border-green-300' 
+                              : 'bg-red-50 text-red-700 border-red-300'
+                          }`}
+                        >
+                          Stok: {stok.toLocaleString("id-ID")} {produk.satuan}
                         </Badge>
                         <span className="text-muted-foreground">•</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs">
-                            Ecer: <span className="font-medium text-foreground">
-                              Rp {Math.round(produk.harga_jual_ecer || produk.harga_jual || 0).toLocaleString("id-ID")}
+                          {hasEcer && (
+                            <span className="text-xs">
+                              Ecer: <span className="font-medium text-foreground">
+                                Rp {Math.round(produk.harga_jual_ecer || produk.harga_jual || 0).toLocaleString("id-ID")}
+                              </span>
                             </span>
-                          </span>
-                          {produk.harga_jual_grosir && produk.harga_jual_grosir !== produk.harga_jual_ecer && (
+                          )}
+                          {hasGrosir && produk.harga_jual_grosir !== produk.harga_jual_ecer && (
                             <>
-                              <span className="text-muted-foreground">•</span>
+                              {hasEcer && <span className="text-muted-foreground">•</span>}
                               <span className="text-xs">
                                 Grosir: <span className="font-medium text-primary">
                                   Rp {Math.round(produk.harga_jual_grosir).toLocaleString("id-ID")}
@@ -239,36 +263,13 @@ export default function ProductSelector({ produkList, onSelectProduk }: ProductS
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {produk.harga_jual_grosir && produk.harga_jual_grosir !== produk.harga_jual_ecer ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onSelectProduk(produk.id, 'ecer')}
-                            className="text-xs h-8"
-                          >
-                            Ecer
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => onSelectProduk(produk.id, 'grosir')}
-                            className="text-xs h-8"
-                          >
-                            Grosir
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => onSelectProduk(produk.id, 'ecer')}
-                          className="text-xs h-8"
-                        >
-                          <Package className="w-4 h-4 mr-1" />
-                          Pilih
-                        </Button>
-                      )}
-                    </div>
+                    {!isStokHabis && (
+                      <div className="shrink-0">
+                        <Badge variant="secondary" className="text-xs px-3 py-1">
+                          Klik untuk tambah
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

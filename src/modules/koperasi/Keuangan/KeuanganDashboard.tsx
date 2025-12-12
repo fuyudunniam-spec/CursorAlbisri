@@ -130,7 +130,7 @@ export default function KeuanganDashboard() {
         .limit(10);
       
       if (error) {
-        console.error('Error fetching recent transactions:', error);
+        // Silent fail - return empty array
         return [];
       }
       
@@ -151,7 +151,7 @@ export default function KeuanganDashboard() {
           .select('*');
 
         if (error) {
-          console.error('Error fetching hak yayasan:', error);
+          // Silent fail - return 0
           return 0;
         }
 
@@ -172,8 +172,8 @@ export default function KeuanganDashboard() {
         }, 0);
 
         return total;
-      } catch (error: any) {
-        console.error('Error calculating hak yayasan:', error);
+      } catch (error) {
+        // Silent fail - return 0
         return 0;
       }
     },

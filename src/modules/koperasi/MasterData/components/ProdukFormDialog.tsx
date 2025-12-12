@@ -53,7 +53,10 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
     enabled: open,
   });
 
-  // Track previous owner_type to detect changes
+  // Track initial owner_type saat dialog dibuka (untuk edit mode)
+  // Ini digunakan untuk mendeteksi apakah user benar-benar mengubah owner_type
+  const initialOwnerTypeRef = useRef<string | undefined>(produk?.owner_type);
+  // Track current owner_type untuk detect perubahan
   const prevOwnerTypeRef = useRef<string | undefined>(produk?.owner_type);
 
   // Auto-generate kode produk berdasarkan owner_type
@@ -91,31 +94,21 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
 
       // Generate kode jika:
       // 1. Create mode (selalu generate)
-      // 2. Edit mode dan owner_type BERUBAH dari nilai sebelumnya (prevOwnerTypeRef)
-      // Jangan generate saat dialog pertama kali dibuka (owner_type sama dengan produk asli)
+      // 2. Edit mode: JANGAN generate di useEffect, biarkan onValueChange yang handle
+      //    Ini mencegah generate saat dialog dibuka atau owner_type tidak berubah
       if (!isEdit) {
         // Create mode: selalu generate
         generateKode();
-      } else if (isEdit && produk) {
-        // Edit mode: hanya generate jika owner_type berbeda dengan nilai sebelumnya
-        // Ini mencegah generate saat dialog dibuka, tapi tetap generate saat user switch owner_type
-        const prevOwnerType = prevOwnerTypeRef.current;
-        if (prevOwnerType && prevOwnerType !== ownerType) {
-          // Owner_type berubah dari nilai sebelumnya - generate kode baru
-          generateKode();
-          prevOwnerTypeRef.current = ownerType;
-        } else if (!prevOwnerType) {
-          // prevOwnerType belum di-set (dialog baru dibuka) - jangan generate, set ref saja
-          prevOwnerTypeRef.current = ownerType;
-        }
-        // Jika owner_type sama dengan prevOwnerType, jangan generate (pertahankan kode yang ada)
       }
+      // Edit mode: tidak generate di useEffect, biarkan onValueChange handler yang handle
+      // saat user benar-benar mengubah owner_type
     }
-  }, [open, isEdit, ownerType, setValue, produk?.id]);
+  }, [open, isEdit, ownerType, setValue]);
 
   // Update ref when produk changes - set initial owner_type
   useEffect(() => {
     if (produk && produk.owner_type) {
+      initialOwnerTypeRef.current = produk.owner_type;
       prevOwnerTypeRef.current = produk.owner_type;
     }
   }, [produk?.id, produk?.owner_type]);
@@ -151,6 +144,7 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
       setShowAddKategori(false);
       setNewKategori('');
       // Set initial owner_type ref untuk mencegah auto-generate saat dialog dibuka
+      initialOwnerTypeRef.current = produkOwnerType;
       prevOwnerTypeRef.current = produkOwnerType;
     } else {
       // Create mode: reset to defaults
@@ -166,6 +160,7 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
       setSelectedKategori('');
       setShowAddKategori(false);
       setNewKategori('');
+      initialOwnerTypeRef.current = 'koperasi';
       prevOwnerTypeRef.current = 'koperasi';
     }
   }, [open, produk?.id, reset]); // Hapus produk?.kode_produk dari dependencies untuk mencegah re-trigger
@@ -412,12 +407,21 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
               value={ownerType || 'koperasi'}
               onValueChange={async (value) => {
                 const newOwnerType = value as 'koperasi' | 'yayasan';
-                const prevOwnerType = prevOwnerTypeRef.current || (produk?.owner_type || 'koperasi');
+                const currentOwnerType = prevOwnerTypeRef.current || ownerType;
                 setValue('owner_type', newOwnerType);
                 
-                // Generate new kode SETIAP KALI owner_type berubah dari nilai sebelumnya
-                // Ini memastikan kode selalu berubah saat user switch owner_type
-                if (prevOwnerType !== newOwnerType) {
+                // Hanya generate kode baru jika:
+                // 1. Edit mode DAN owner_type benar-benar berubah dari nilai awal produk
+                // 2. Owner_type berbeda dari nilai sebelumnya (user mengubah, bukan saat dialog dibuka)
+                const initialOwnerType = initialOwnerTypeRef.current || (produk?.owner_type || 'koperasi');
+                const isOwnerTypeChanged = currentOwnerType !== newOwnerType;
+                const isDifferentFromInitial = newOwnerType !== initialOwnerType;
+                
+                // Generate new kode HANYA jika:
+                // - Edit mode
+                // - Owner_type berubah dari nilai sebelumnya (user mengubah)
+                // - Owner_type berbeda dari initial (bukan nilai awal produk)
+                if (isEdit && isOwnerTypeChanged && isDifferentFromInitial) {
                   try {
                     const prefix = newOwnerType === 'yayasan' ? 'YYS-' : 'KOP-';
                     const { data, error } = await supabase
@@ -444,6 +448,9 @@ export default function ProdukFormDialog({ open, onClose, produk }: ProdukFormDi
                   } catch (error) {
                     console.error(`Error generating kode ${newOwnerType}:`, error);
                   }
+                } else {
+                  // Update ref meskipun tidak generate kode
+                  prevOwnerTypeRef.current = newOwnerType;
                 }
               }}
               className="flex gap-4 mt-2"

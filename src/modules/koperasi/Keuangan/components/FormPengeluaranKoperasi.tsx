@@ -10,19 +10,14 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { AkunKasService, AkunKas } from '@/services/akunKas.service';
 import { addKeuanganKoperasiTransaction } from '@/services/keuanganKoperasi.service';
+import { KATEGORI_PENGELUARAN } from '../../constants';
+import { formatCurrencyFromString, parseCurrencyString } from '@/utils/formatCurrency';
 
 interface FormPengeluaranKoperasiProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
 }
-
-const KATEGORI_PENGELUARAN = [
-  'Pembelian Barang',
-  'Biaya Operasional',
-  'Bagi Hasil Yayasan',
-  'Lain-lain'
-];
 
 const FormPengeluaranKoperasi: React.FC<FormPengeluaranKoperasiProps> = ({ isOpen, onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
@@ -59,8 +54,8 @@ const FormPengeluaranKoperasi: React.FC<FormPengeluaranKoperasiProps> = ({ isOpe
         setAkunKasId(koperasiAccounts[0].id);
       }
     } catch (error) {
-      console.error('Error loading akun kas:', error);
-      toast.error('Gagal memuat akun kas');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat akun kas';
+      toast.error(errorMessage);
     }
   };
 
@@ -93,7 +88,7 @@ const FormPengeluaranKoperasi: React.FC<FormPengeluaranKoperasiProps> = ({ isOpe
       return;
     }
 
-    const jumlahNum = parseFloat(jumlah.replace(/\./g, '').replace(',', '.'));
+    const jumlahNum = parseCurrencyString(jumlah);
     if (isNaN(jumlahNum) || jumlahNum <= 0) {
       toast.error('Jumlah harus berupa angka positif');
       return;
@@ -134,7 +129,12 @@ const FormPengeluaranKoperasi: React.FC<FormPengeluaranKoperasiProps> = ({ isOpe
           p_akun_id: akunKasId
         });
       } catch (saldoError) {
-        console.warn('Warning ensuring saldo correct:', saldoError);
+        // Silent fail - saldo will be recalculated on next transaction
+        // Log only in development
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.warn('Warning ensuring saldo correct:', saldoError);
+        }
       }
 
       // Reset form
@@ -148,23 +148,14 @@ const FormPengeluaranKoperasi: React.FC<FormPengeluaranKoperasiProps> = ({ isOpe
       toast.success('Pengeluaran berhasil disimpan');
       onSuccess?.();
       onClose();
-    } catch (error: any) {
-      console.error('Error saving pengeluaran:', error);
-      toast.error('Gagal menyimpan pengeluaran: ' + (error.message || 'Unknown error'));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal menyimpan pengeluaran';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const formatCurrency = (amount: string) => {
-    const num = parseFloat(amount.replace(/\./g, '').replace(',', '.'));
-    if (isNaN(num)) return '';
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0
-    }).format(num);
-  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -223,7 +214,7 @@ const FormPengeluaranKoperasi: React.FC<FormPengeluaranKoperasiProps> = ({ isOpe
                 required
               />
               {jumlah && (
-                <p className="text-sm text-gray-500">{formatCurrency(jumlah)}</p>
+                <p className="text-sm text-gray-500">{formatCurrencyFromString(jumlah)}</p>
               )}
             </div>
             <div className="space-y-2">

@@ -241,8 +241,6 @@ const KelolaHPPDanBagiHasilPage = () => {
         return !isKewajiban;
       });
       
-      console.log('📊 Cost operasional filtered:', filtered.length, 'from', data?.length || 0);
-      
       return filtered;
     },
     enabled: !!kasKoperasiId,
@@ -284,8 +282,7 @@ const KelolaHPPDanBagiHasilPage = () => {
         .order('tanggal', { ascending: false });
 
       if (txError) {
-        console.error('Error fetching transaksi_inventaris:', txError);
-        throw txError;
+        throw new Error(`Gagal memuat transaksi inventaris: ${txError.message}`);
       }
 
       // 2. Get items from kop_penjualan (penjualan koperasi terbaru)
@@ -331,19 +328,19 @@ const KelolaHPPDanBagiHasilPage = () => {
         .order('tanggal', { ascending: false });
 
       if (kopError) {
-        console.error('Error fetching kop_penjualan:', kopError);
         // Jangan throw, lanjutkan dengan data transaksi_inventaris saja
+        // Log only in development
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.warn('Error fetching kop_penjualan (non-critical):', kopError);
+        }
       }
-
-      console.log('📊 Total transaksi_inventaris found:', transactions?.length || 0);
-      console.log('📊 Total kop_penjualan found:', kopPenjualan?.length || 0);
-      console.log('📊 Date range:', dateRange.startDate, 'to', dateRange.endDate);
       
       // Filter transaksi_inventaris: hanya item yayasan yang boleh dijual koperasi
       const filteredTransactions = (transactions || []).filter((tx: any) => {
         const inventaris = tx.inventaris;
         if (!inventaris) {
-          console.log('⚠️ Transaction without inventaris:', tx.item_id);
+          // Skip transactions without inventaris data
           return false;
         }
         
@@ -384,9 +381,6 @@ const KelolaHPPDanBagiHasilPage = () => {
           }
         });
       });
-      
-      console.log('📊 Filtered transaksi_inventaris (yayasan items):', filteredTransactions.length);
-      console.log('📊 Filtered kop_penjualan (yayasan items):', filteredKopPenjualan.length);
 
       // Group by item_id and calculate totals (gabungkan kedua sumber)
       const allTransactions = [
@@ -493,7 +487,6 @@ const KelolaHPPDanBagiHasilPage = () => {
         .single();
 
       if (error) {
-        console.error('Error fetching item:', error);
         // Fallback to provided item if fetch fails
         setEditingItem(item);
       } else {
@@ -505,8 +498,9 @@ const KelolaHPPDanBagiHasilPage = () => {
         return;
       }
     } catch (error) {
-      console.error('Error in handleEditHPP:', error);
       // Fallback to provided item
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data item';
+      toast.error(errorMessage);
       setEditingItem(item);
     }
 
@@ -795,9 +789,9 @@ const KelolaHPPDanBagiHasilPage = () => {
       queryClient.invalidateQueries({ queryKey: ['koperasi-cost-operasional'] });
       queryClient.invalidateQueries({ queryKey: ['inventaris-sold-items'] });
       queryClient.invalidateQueries({ queryKey: ['koperasi-bagi-hasil'] });
-    } catch (error: any) {
-      console.error('Error saving decision:', error);
-      toast.error(error.message || 'Gagal menyimpan keputusan');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal menyimpan keputusan';
+      toast.error(errorMessage);
     } finally {
       setIsSavingDecision(false);
     }
@@ -814,7 +808,6 @@ const KelolaHPPDanBagiHasilPage = () => {
         .single();
 
       if (kasError) {
-        console.error('Error loading Kas Koperasi:', kasError);
         toast.error('Akun Kas Koperasi tidak ditemukan');
         return;
       }
@@ -825,8 +818,8 @@ const KelolaHPPDanBagiHasilPage = () => {
         loadMonthlySummaries()
       ]);
     } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Gagal memuat data bagi hasil');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data bagi hasil';
+      toast.error(errorMessage);
     }
   };
 
@@ -861,8 +854,8 @@ const KelolaHPPDanBagiHasilPage = () => {
 
       setMonthlySummaries(sortedData);
     } catch (error) {
-      console.error('Error loading monthly summaries:', error);
-      toast.error('Gagal memuat ringkasan bulanan');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat ringkasan bulanan';
+      toast.error(errorMessage);
     }
   };
 
@@ -898,8 +891,8 @@ const KelolaHPPDanBagiHasilPage = () => {
 
       setTransactions(transformedTx);
     } catch (error) {
-      console.error('Error loading filtered transactions:', error);
-      toast.error('Gagal memuat data transaksi');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data transaksi';
+      toast.error(errorMessage);
     }
   };
 
@@ -930,9 +923,9 @@ const KelolaHPPDanBagiHasilPage = () => {
 
       setShowPaymentDialog(false);
       setSelectedSummary(null);
-    } catch (error: any) {
-      console.error('Error processing payment:', error);
-      toast.error(error.message || 'Gagal memproses pembayaran');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memproses pembayaran';
+      toast.error(errorMessage);
     } finally {
       setProcessingPayment(false);
     }

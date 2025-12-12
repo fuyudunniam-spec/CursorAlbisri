@@ -1150,12 +1150,32 @@ export const koperasiService = {
       sumber_modal_id: item.sumber_modal_id || null,
     }));
     
+    // Convert tanggal string (YYYY-MM-DD) to ISO string with time
+    // Frontend mengirim 'YYYY-MM-DD', tapi database butuh timestamptz
+    let tanggalParam: string;
+    if (data.tanggal && data.tanggal.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      // Jika format YYYY-MM-DD, tambahkan waktu
+      tanggalParam = `${data.tanggal}T00:00:00.000Z`;
+    } else {
+      // Jika sudah format ISO, gunakan langsung
+      tanggalParam = data.tanggal || new Date().toISOString();
+    }
+    
+    console.log('🔧 createPenjualan - Parameters:', {
+      no_penjualan: data.no_penjualan,
+      tanggal: tanggalParam,
+      kasir_id: data.kasir_id,
+      items_count: itemsJson.length,
+      total: data.total,
+    });
+    
     // Call atomic RPC function
+    // Jika no_penjualan tidak ada, biarkan NULL - trigger akan auto-generate
     const { data: result, error } = await supabase.rpc(
       'rpc_create_penjualan_koperasi_atomic',
       {
-        p_no_penjualan: data.no_penjualan,
-        p_tanggal: data.tanggal,
+        p_no_penjualan: data.no_penjualan || null, // NULL akan trigger auto-generate
+        p_tanggal: tanggalParam,
         p_kasir_id: data.kasir_id,
         p_subtotal: data.subtotal,
         p_total: data.total,
@@ -1170,39 +1190,111 @@ export const koperasiService = {
       }
     );
     
+    console.log('📥 RPC Response:', { result, error });
+    
     if (error) {
-      console.error('Error creating penjualan:', error);
+      console.error('❌ Error creating penjualan:', error);
+      console.error('❌ Error details:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+      // Check if error is related to GROUP BY clause
+      if (error.message && error.message.includes('GROUP BY')) {
+        throw new Error('Error database: Masalah dengan query GROUP BY. Silakan hubungi administrator untuk memperbaiki function database.');
+      }
+      // Check if error is related to UUID type mismatch
+      if (error.message && (error.message.includes('uuid') || error.message.includes('operator does not exist'))) {
+        throw new Error(`Error tipe data UUID: ${error.message}. Silakan hubungi administrator.`);
+      }
       throw new Error(error.message || 'Gagal membuat penjualan');
     }
     
-    if (!result || !result.success) {
-      throw new Error(result?.error || 'Gagal membuat penjualan');
+    if (!result) {
+      console.error('❌ No result returned from RPC');
+      throw new Error('Tidak ada response dari server. Silakan coba lagi.');
     }
     
-    // Fetch created penjualan for return
-    const { data: penjualan, error: fetchError } = await supabase
+    console.log('✅ RPC Result:', result);
+    
+    if (!result.success) {
+      // Tampilkan pesan error yang lebih informatif
+      const errorMessage = result?.error || 'Gagal membuat penjualan';
+      console.error('❌ RPC returned error:', errorMessage);
+      console.error('❌ RPC error details:', {
+        error: result?.error,
+        barang_id: result?.barang_id,
+        barang_nama: result?.barang_nama,
+        stok_available: result?.stok_available,
+        stok_required: result?.stok_required,
+      });
+      // Jika ada informasi barang, tambahkan ke pesan
+      if (result?.barang_nama) {
+        throw new Error(`${errorMessage}\nBarang: ${result.barang_nama}\nStok tersedia: ${result.stok_available || 0}, Dibutuhkan: ${result.stok_required || 0}`);
+      }
+      // Jika error mengandung ID barang, coba fetch nama barang untuk menampilkan info lebih jelas
+      if (errorMessage.includes('barang ID') && result?.barang_id) {
+        throw new Error(`${errorMessage}\nSilakan cek stok barang di Master Barang.`);
+      }
+      throw new Error(errorMessage);
+    }
+    
+    console.log('✅ Penjualan berhasil dibuat:', result.penjualan_id);
+    
+    // Jika RPC berhasil, langsung return data dari result tanpa fetch tambahan
+    // Ini menghindari query tambahan yang mungkin menyebabkan error GROUP BY
+    // Return minimal data yang diperlukan
+    return {
+      id: result.penjualan_id,
+      no_penjualan: result.no_penjualan || data.no_penjualan,
+      nomor_struk: result.no_penjualan || data.no_penjualan,
+      tanggal: data.tanggal,
+      total_transaksi: data.total,
+      subtotal: data.subtotal,
+      diskon: data.diskon,
+      total: data.total,
+      metode_pembayaran: data.metode_bayar,
+      status_pembayaran: 'lunas',
+      kasir_id: data.kasir_id,
+      shift_id: data.shift_id || null,
+      total_hpp: result.total_hpp || 0,
+      total_margin: result.total_margin || 0,
+      total_bagian_yayasan: result.total_bagian_yayasan || 0,
+      total_bagian_koperasi: result.total_bagian_koperasi || 0,
+      kop_penjualan_detail: [], // Detail akan di-fetch terpisah jika diperlukan
+    } as any;
+  },
+
+  /**
+   * Get penjualan by ID with kasir name
+   */
+  async getPenjualanById(penjualanId: string) {
+    // Get penjualan data
+    const { data, error } = await supabase
       .from('kop_penjualan')
-      .select(`
-        *,
-        kop_penjualan_detail(*)
-      `)
-      .eq('id', result.penjualan_id)
+      .select('*')
+      .eq('id', penjualanId)
       .single();
-    
-    if (fetchError) {
-      console.error('Error fetching created penjualan:', fetchError);
-      // Return partial data if fetch fails
-      return {
-        id: result.penjualan_id,
-        nomor_struk: result.no_penjualan,
-        total_hpp: result.total_hpp,
-        total_margin: result.total_margin,
-        total_bagian_yayasan: result.total_bagian_yayasan,
-        total_bagian_koperasi: result.total_bagian_koperasi,
-      };
+
+    if (error) throw error;
+
+    // Get kasir name separately (kasir_id doesn't have FK relationship to profiles)
+    let namaKasir = null;
+    if (data.kasir_id) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', data.kasir_id)
+        .single();
+      
+      namaKasir = profile?.full_name || null;
     }
-    
-    return penjualan;
+
+    return {
+      ...data,
+      nama_kasir: namaKasir,
+    };
   },
 
   /**
@@ -1215,6 +1307,129 @@ export const koperasiService = {
   },
 
   /**
+   * Restore stock for edit mode (without deleting penjualan)
+   * This allows user to edit penjualan without stock validation issues
+   */
+  async restoreStockForEdit(penjualanId: string) {
+    console.log('🔄 restoreStockForEdit called with ID:', penjualanId);
+    
+    try {
+      const { data: result, error } = await supabase.rpc(
+        'restore_stock_for_edit_kop_penjualan',
+        { p_penjualan_id: penjualanId }
+      );
+
+      if (error) {
+        console.error('❌ RPC Error:', error);
+        throw new Error(error.message || 'Gagal mengembalikan stok untuk edit');
+      }
+
+      if (result && !result.success) {
+        console.error('❌ RPC Result Error:', result.error);
+        throw new Error(result.error || 'Gagal mengembalikan stok untuk edit');
+      }
+
+      console.log('✅ Stok berhasil dikembalikan untuk edit');
+      return result;
+    } catch (error: any) {
+      console.error('❌ Error in restoreStockForEdit:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Reverse restore stock (reduce stock back) when canceling edit
+   * This is needed to maintain stock accuracy if user cancels edit without checkout
+   */
+  async reverseRestoreStockForEdit(penjualanId: string) {
+    console.log('🔄 reverseRestoreStockForEdit called with ID:', penjualanId);
+    
+    try {
+      // Get penjualan detail to know how much stock to reduce
+      const { data: detail, error: fetchError } = await supabase
+        .from('kop_penjualan_detail')
+        .select('barang_id, jumlah')
+        .eq('penjualan_id', penjualanId);
+
+      if (fetchError) {
+        console.error('❌ Error fetching penjualan detail:', fetchError);
+        throw new Error('Gagal mengambil detail penjualan');
+      }
+
+      if (!detail || detail.length === 0) {
+        console.log('⚠️ No detail found, nothing to reverse');
+        return { success: true, message: 'No items to reverse' };
+      }
+
+      // Reduce stock for each item
+      for (const item of detail) {
+        // Get current stock
+        const { data: barang, error: fetchError } = await supabase
+          .from('kop_barang')
+          .select('stok')
+          .eq('id', item.barang_id)
+          .single();
+
+        if (fetchError || !barang) {
+          console.error(`❌ Error fetching stock for ${item.barang_id}:`, fetchError);
+          continue;
+        }
+
+        // Calculate new stock (ensure non-negative)
+        const currentStock = Math.max(0, Math.floor(barang.stok || 0));
+        const newStock = Math.max(0, currentStock - item.jumlah);
+
+        // Update stock
+        const { error: updateError } = await supabase
+          .from('kop_barang')
+          .update({ stok: newStock })
+          .eq('id', item.barang_id);
+
+        if (updateError) {
+          console.error(`❌ Error reducing stock for ${item.barang_id}:`, updateError);
+        }
+      }
+
+      console.log('✅ Stok berhasil dikurangi kembali (reverse restore)');
+      return { success: true, message: 'Stock reversed successfully' };
+    } catch (error: any) {
+      console.error('❌ Error in reverseRestoreStockForEdit:', error);
+      // Don't throw, just log - this is a cleanup operation
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Update existing penjualan
+   * Strategy: Delete old transaction and create new one (safer than in-place update)
+   * Note: Stock should already be restored when entering edit mode
+   * To avoid double restore, we reverse restore first, then delete (which will restore again to correct value)
+   */
+  async updatePenjualan(penjualanId: string, data: KoperasiPenjualanInsert) {
+    console.log('🔄 updatePenjualan called with ID:', penjualanId);
+    
+    try {
+      // Step 1: Reverse restore stock (reduce stock back to original value before edit)
+      // This is needed because stock was restored when entering edit mode
+      await this.reverseRestoreStockForEdit(penjualanId);
+      console.log('✅ Stock reversed to original value');
+      
+      // Step 2: Delete old penjualan (this will restore stock again to correct value)
+      await this.deletePenjualan(penjualanId);
+      console.log('✅ Old penjualan deleted, stock restored');
+      
+      // Step 3: Create new penjualan with updated data (this will reduce stock)
+      const newPenjualan = await this.createPenjualan(data);
+      console.log('✅ New penjualan created:', newPenjualan.id);
+      
+      return newPenjualan;
+    } catch (error: any) {
+      console.error('❌ Error updating penjualan:', error);
+      throw new Error(error.message || 'Gagal memperbarui penjualan');
+    }
+  },
+
+  /**
    * Get unified sales history from both kop_penjualan and transaksi_inventaris
    */
   async getUnifiedSalesHistory(filters?: {
@@ -1224,7 +1439,8 @@ export const koperasiService = {
   }) {
     const { startDate, endDate, filterOwnerType = 'all' } = filters || {};
     
-    // Get sales from kop_penjualan - only those with details (valid transactions)
+    // Get sales from kop_penjualan - ambil semua penjualan yang valid
+    // Jangan filter berdasarkan detail karena detail mungkin kosong (akan diperbaiki nanti)
     let kopQuery = supabase
       .from('kop_penjualan')
       .select(`
@@ -1234,7 +1450,9 @@ export const koperasiService = {
         metode_pembayaran,
         kasir_id,
         created_at,
-        kop_penjualan_detail!inner(id)
+        nomor_struk,
+        items_summary,
+        kop_penjualan_detail(id)
       `)
       .eq('status_pembayaran', 'lunas')
       .gt('total_transaksi', 0); // Only transactions with positive total
@@ -1308,18 +1526,21 @@ export const koperasiService = {
       
       results = results.concat(uniqueKopSales
         .filter((s: any) => {
-          // Filter out invalid transactions
+          // Filter out invalid transactions - hanya pastikan total > 0 dan id ada
+          // Jangan filter berdasarkan detail karena detail mungkin kosong
           const total = parseFloat(s.total_transaksi || 0);
-          return total > 0 && s.id && s.kop_penjualan_detail && s.kop_penjualan_detail.length > 0;
+          return total > 0 && s.id;
         })
         .map((s: any) => ({
           sale_id: s.id,
           tanggal: s.tanggal,
-          customer_name: s.metode_pembayaran || '-',
+          customer_name: s.metode_pembayaran || s.nomor_struk || '-',
           total_amount: parseFloat(s.total_transaksi || 0),
           source_type: 'kop_penjualan' as const,
           created_at: s.created_at,
           created_by: s.kasir_id || undefined, // Use kasir_id as created_by for compatibility
+          items_summary: s.items_summary || null, // NEW: Include items_summary
+          nomor_struk: s.nomor_struk || null, // NEW: Include nomor_struk
         })));
     }
     
@@ -1391,7 +1612,33 @@ export const koperasiService = {
   }) {
     const { startDate, endDate } = filters || {};
     
-    // Get kop_penjualan detail
+    // Get kop_penjualan detail dengan query terpisah untuk menghindari masalah GROUP BY
+    // Query kop_penjualan terlebih dahulu dengan filter tanggal
+    let penjualanQuery = supabase
+      .from('kop_penjualan')
+      .select('id, tanggal, status_pembayaran')
+      .eq('status_pembayaran', 'lunas');
+    
+    if (startDate) penjualanQuery = penjualanQuery.gte('tanggal', startDate);
+    if (endDate) penjualanQuery = penjualanQuery.lte('tanggal', endDate);
+    
+    const { data: penjualanData, error: penjualanError } = await penjualanQuery;
+    if (penjualanError) throw penjualanError;
+    
+    // Jika tidak ada penjualan, return empty summary
+    if (!penjualanData || penjualanData.length === 0) {
+      return {
+        total_revenue: 0,
+        total_hpp: 0,
+        total_profit: 0,
+        kewajiban_yayasan: 0,
+        margin_koperasi: 0,
+      };
+    }
+    
+    const penjualanIds = penjualanData.map((p: any) => p.id);
+    
+    // Get kop_penjualan detail untuk penjualan yang sudah difilter
     let kopQuery = supabase
       .from('kop_penjualan_detail')
       .select(`
@@ -1401,16 +1648,9 @@ export const koperasiService = {
         margin,
         bagian_yayasan,
         bagian_koperasi,
-        kop_penjualan!inner (
-          id,
-          tanggal,
-          status_pembayaran
-        )
+        penjualan_id
       `)
-      .eq('kop_penjualan.status_pembayaran', 'lunas');
-    
-    if (startDate) kopQuery = kopQuery.gte('kop_penjualan.tanggal', startDate);
-    if (endDate) kopQuery = kopQuery.lte('kop_penjualan.tanggal', endDate);
+      .in('penjualan_id', penjualanIds);
     
     const { data: kopDetails, error: kopError } = await kopQuery;
     if (kopError) throw kopError;
@@ -1622,15 +1862,73 @@ export const koperasiService = {
 
   /**
    * Delete penjualan (kop_penjualan only, for now)
+   * Uses RPC function delete_kop_penjualan to handle UUID properly and rollback stock
+   * 
+   * This function:
+   * - Uses RPC to avoid UUID type mismatch errors
+   * - Automatically rolls back stock for all items
+   * - Deletes detail, header, and related financial entries
+   * - All operations are atomic within the RPC function
    */
   async deletePenjualan(penjualanId: string) {
-    // Delete kop_penjualan (cascade will handle details)
-    const { error } = await supabase
-      .from('kop_penjualan')
-      .delete()
-      .eq('id', penjualanId);
+    console.log('🗑️ deletePenjualan called with ID:', penjualanId);
     
-    if (error) throw error;
+    // Validate penjualanId is a valid UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(penjualanId)) {
+      console.error('❌ Invalid UUID format:', penjualanId);
+      throw new Error(`Format ID penjualan tidak valid: ${penjualanId}`);
+    }
+
+    try {
+      // Use RPC function to delete penjualan with proper UUID handling
+      // This function handles:
+      // - Stock rollback for all items
+      // - Deletion of detail records
+      // - Deletion of header record
+      // - Deletion of related financial entries
+      // - All in a single atomic transaction
+      console.log('🔧 Calling RPC delete_kop_penjualan...');
+      
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('delete_kop_penjualan', {
+        p_penjualan_id: penjualanId
+      });
+      
+      if (rpcError) {
+        console.error('❌ RPC error:', rpcError);
+        
+        // Handle specific error cases
+        if (rpcError.code === 'P0001' || rpcError.message?.includes('tidak ditemukan')) {
+          throw new Error(`Penjualan dengan ID ${penjualanId} tidak ditemukan`);
+        }
+        
+        if (rpcError.message?.includes('Stok menjadi negatif')) {
+          throw new Error(`Gagal menghapus penjualan: ${rpcError.message}. Stok tidak mencukupi untuk rollback.`);
+        }
+        
+        throw new Error(rpcError.message || 'Gagal menghapus penjualan');
+      }
+      
+      // Check RPC result
+      if (rpcResult && !rpcResult.success) {
+        const errorMsg = rpcResult.error || 'Gagal menghapus penjualan';
+        console.error('❌ RPC returned error:', errorMsg);
+        throw new Error(errorMsg);
+      }
+      
+      // Success
+      const deletedItems = rpcResult?.deleted_items || 0;
+      console.log(`✅ Penjualan berhasil dihapus. ${deletedItems} item(s) stok dikembalikan.`);
+      
+    } catch (error: any) {
+      console.error('❌ Error in deletePenjualan:', error);
+      
+      // Re-throw with better error message
+      if (error.message) {
+        throw error;
+      }
+      throw new Error(`Gagal menghapus penjualan: ${error.toString()}`);
+    }
   },
 
   /**
@@ -1644,6 +1942,7 @@ export const koperasiService = {
     const { startDate, endDate, monthlyTrendAllTime } = filters || {};
 
     // Get sales from kop_penjualan (new system) - for hourly data (uses filter)
+    // Ambil detail dengan nama barang untuk popular items
     let kopQuery = supabase
       .from('kop_penjualan')
       .select(`
@@ -1651,14 +1950,20 @@ export const koperasiService = {
         tanggal,
         created_at,
         total_transaksi,
-        kop_penjualan_detail (
+        nomor_struk,
+        metode_pembayaran,
+        items_summary,
+        kop_penjualan_detail(
+          id,
           jumlah,
-          kop_barang (
+          kop_barang(
+            id,
             nama_barang
           )
         )
       `)
-      .eq('status_pembayaran', 'lunas');
+      .eq('status_pembayaran', 'lunas')
+      .gt('total_transaksi', 0); // Hanya transaksi dengan total > 0
 
     // Apply date filters - ensure proper chaining
     if (startDate) {
@@ -1709,10 +2014,28 @@ export const koperasiService = {
     
     if (monthlyTrendAllTime) {
       // Get all kop_penjualan for monthly trend
+      // Ambil detail dengan nama barang untuk popular items
       const { data: kopAll } = await supabase
         .from('kop_penjualan')
-        .select('id, tanggal, created_at, total_transaksi, kop_penjualan_detail(jumlah, kop_barang(nama_barang))')
+        .select(`
+          id,
+          tanggal,
+          created_at,
+          total_transaksi,
+          nomor_struk,
+          metode_pembayaran,
+          items_summary,
+          kop_penjualan_detail(
+            id,
+            jumlah,
+            kop_barang(
+              id,
+              nama_barang
+            )
+          )
+        `)
         .eq('status_pembayaran', 'lunas')
+        .gt('total_transaksi', 0) // Hanya transaksi dengan total > 0
         .order('tanggal', { ascending: false });
 
       // Get all transaksi_inventaris for monthly trend
@@ -1783,18 +2106,61 @@ export const koperasiService = {
     }));
 
     // Combine and process data
+    // Untuk kop_penjualan, gunakan detail dengan nama barang
     const allSales = [
-      ...(kopSales || []).map((s: any) => ({
-        id: s.id,
-        tanggal: s.tanggal,
-        created_at: s.created_at,
-        total: parseFloat(s.total_transaksi || 0),
-        items: (s.kop_penjualan_detail || []).map((d: any) => ({
-          nama_barang: d.kop_barang?.nama_barang || 'Unknown',
-          jumlah: d.jumlah || 0,
-        })),
-        source: 'kop_penjualan' as const,
-      })),
+      ...(kopSales || []).map((s: any) => {
+        // Jika ada detail, gunakan detail dengan nama barang
+        if (s.kop_penjualan_detail && s.kop_penjualan_detail.length > 0) {
+          return {
+            id: s.id,
+            tanggal: s.tanggal,
+            created_at: s.created_at,
+            total: parseFloat(s.total_transaksi || 0),
+            items: s.kop_penjualan_detail.map((d: any) => ({
+              nama_barang: d.kop_barang?.nama_barang || 'Unknown',
+              jumlah: d.jumlah || 0,
+            })),
+            source: 'kop_penjualan' as const,
+          };
+        }
+        
+        // Jika tidak ada detail, parse dari items_summary
+        if (s.items_summary) {
+          // Parse items_summary: "Beras Acik 25 Kg x1, Mie Sedaap Goreng x1"
+          const items = s.items_summary.split(', ').map((itemStr: string) => {
+            const match = itemStr.match(/^(.+?)\s+x(\d+)$/);
+            if (match) {
+              return {
+                nama_barang: match[1].trim(),
+                jumlah: parseInt(match[2], 10) || 1,
+              };
+            }
+            return {
+              nama_barang: itemStr.trim(),
+              jumlah: 1,
+            };
+          });
+          
+          return {
+            id: s.id,
+            tanggal: s.tanggal,
+            created_at: s.created_at,
+            total: parseFloat(s.total_transaksi || 0),
+            items,
+            source: 'kop_penjualan' as const,
+          };
+        }
+        
+        // Fallback terakhir: skip penjualan ini dari popular items
+        return {
+          id: s.id,
+          tanggal: s.tanggal,
+          created_at: s.created_at,
+          total: parseFloat(s.total_transaksi || 0),
+          items: [], // Skip dari popular items
+          source: 'kop_penjualan' as const,
+        };
+      }),
       ...(invSales || []).map((s: any) => ({
         id: s.id,
         tanggal: s.tanggal,
@@ -1822,17 +2188,58 @@ export const koperasiService = {
     if (monthlyTrendAllTime && kopSalesAllTime.length > 0) {
       // Combine all-time data for monthly trend
       salesForDailyTrend = [
-        ...(kopSalesAllTime || []).map((s: any) => ({
-          id: s.id,
-          tanggal: s.tanggal,
-          created_at: s.created_at,
-          total: parseFloat(s.total_transaksi || 0),
-          items: (s.kop_penjualan_detail || []).map((d: any) => ({
-            nama_barang: d.kop_barang?.nama_barang || 'Unknown',
-            jumlah: d.jumlah || 0,
-          })),
-          source: 'kop_penjualan' as const,
-        })),
+        ...(kopSalesAllTime || []).map((s: any) => {
+          // Jika ada detail, gunakan detail dengan nama barang
+          if (s.kop_penjualan_detail && s.kop_penjualan_detail.length > 0) {
+            return {
+              id: s.id,
+              tanggal: s.tanggal,
+              created_at: s.created_at,
+              total: parseFloat(s.total_transaksi || 0),
+              items: s.kop_penjualan_detail.map((d: any) => ({
+                nama_barang: d.kop_barang?.nama_barang || 'Unknown',
+                jumlah: d.jumlah || 0,
+              })),
+              source: 'kop_penjualan' as const,
+            };
+          }
+          
+          // Jika tidak ada detail, parse dari items_summary
+          if (s.items_summary) {
+            const items = s.items_summary.split(', ').map((itemStr: string) => {
+              const match = itemStr.match(/^(.+?)\s+x(\d+)$/);
+              if (match) {
+                return {
+                  nama_barang: match[1].trim(),
+                  jumlah: parseInt(match[2], 10) || 1,
+                };
+              }
+              return {
+                nama_barang: itemStr.trim(),
+                jumlah: 1,
+              };
+            });
+            
+            return {
+              id: s.id,
+              tanggal: s.tanggal,
+              created_at: s.created_at,
+              total: parseFloat(s.total_transaksi || 0),
+              items,
+              source: 'kop_penjualan' as const,
+            };
+          }
+          
+          // Fallback terakhir: skip penjualan ini dari popular items
+          return {
+            id: s.id,
+            tanggal: s.tanggal,
+            created_at: s.created_at,
+            total: parseFloat(s.total_transaksi || 0),
+            items: [], // Skip dari popular items
+            source: 'kop_penjualan' as const,
+          };
+        }),
         ...(invSalesAllTime || []).map((s: any) => ({
           id: s.id,
           tanggal: s.tanggal,
@@ -1856,7 +2263,15 @@ export const koperasiService = {
     // Calculate popular items
     const itemCounts: Record<string, { nama: string; jumlah: number; total: number }> = {};
     allSales.forEach((sale) => {
+      // Skip jika tidak ada items (untuk penjualan tanpa detail)
+      if (!sale.items || sale.items.length === 0) return;
+      
       sale.items.forEach((item) => {
+        // Skip jika nama barang tidak valid
+        if (!item.nama_barang || item.nama_barang === 'Unknown' || item.nama_barang.includes('PJ-')) {
+          return;
+        }
+        
         if (!itemCounts[item.nama_barang]) {
           itemCounts[item.nama_barang] = {
             nama: item.nama_barang,
@@ -1865,7 +2280,9 @@ export const koperasiService = {
           };
         }
         itemCounts[item.nama_barang].jumlah += item.jumlah;
-        itemCounts[item.nama_barang].total += sale.total / sale.items.length; // Distribute total evenly
+        // Distribute total berdasarkan proporsi jumlah item
+        const itemProportion = sale.items.length > 0 ? item.jumlah / sale.items.reduce((sum: number, i: any) => sum + i.jumlah, 0) : 1 / sale.items.length;
+        itemCounts[item.nama_barang].total += sale.total * itemProportion;
       });
     });
 
@@ -1887,6 +2304,7 @@ export const koperasiService = {
 export const setoranCashKasirService = {
   // Get total cash sales for kasir (belum disetor)
   async getTotalCashSalesForKasir(kasirId: string, shiftId?: string) {
+    // Get all cash sales for this kasir
     let query = supabase
       .from('kop_penjualan')
       .select('id, total_transaksi, metode_pembayaran, tanggal')
@@ -1895,29 +2313,34 @@ export const setoranCashKasirService = {
       .eq('status_pembayaran', 'lunas');
 
     if (shiftId) {
-      query = query.eq('shift_id', shiftId);
-    } else {
-      // Jika tidak ada shift, ambil semua penjualan cash yang belum disetor
-      const { data: setoranData } = await supabase
-        .from('kop_setoran_cash_kasir')
-        .select('penjualan_id')
-        .eq('kasir_id', kasirId)
-        .eq('status', 'posted');
-
-      const setoranPenjualanIds = new Set((setoranData || []).map((s: any) => s.penjualan_id).filter(Boolean));
-
-      const { data: allPenjualan } = await query;
-      const belumDisetor = (allPenjualan || []).filter((p: any) => !setoranPenjualanIds.has(p.id));
-      
-      const total = belumDisetor.reduce((sum: number, p: any) => sum + parseFloat(p.total_transaksi || 0), 0);
-      return total;
+      // Note: shift_id tidak ada di kop_penjualan, jadi kita skip filter ini
+      // Jika shift diperlukan, bisa filter berdasarkan tanggal
     }
 
-    const { data, error } = await query;
+    const { data: allPenjualan, error } = await query;
     if (error) throw error;
 
-    const total = (data || []).reduce((sum: number, p: any) => sum + parseFloat(p.total_transaksi || 0), 0);
-    return total;
+    // Get penjualan yang sudah di-post ke keuangan_koperasi (sudah disetor)
+    const { data: postedSales } = await supabase
+      .from('keuangan_koperasi')
+      .select('source_id')
+      .eq('source_module', 'kop_penjualan')
+      .eq('jenis_transaksi', 'Pemasukan')
+      .eq('status', 'posted')
+      .in('source_id', (allPenjualan || []).map((p: any) => p.id));
+
+    const postedSaleIds = new Set((postedSales || []).map((s: any) => s.source_id));
+
+    // Filter penjualan yang belum disetor (belum ada di keuangan_koperasi)
+    const belumDisetor = (allPenjualan || []).filter((p: any) => !postedSaleIds.has(p.id));
+
+    // Calculate total cash sales yang belum disetor
+    const totalPenjualanCash = belumDisetor.reduce(
+      (sum: number, p: any) => sum + parseFloat(p.total_transaksi || 0),
+      0
+    );
+
+    return totalPenjualanCash;
   },
 
   // Get total setoran kasir
@@ -1928,9 +2351,11 @@ export const setoranCashKasirService = {
       .eq('kasir_id', kasirId)
       .eq('status', 'posted');
 
-    if (shiftId) {
-      query = query.eq('shift_id', shiftId);
-    }
+    // Note: shift_id tidak ada di kop_setoran_cash_kasir
+    // Jika shift diperlukan, bisa filter berdasarkan tanggal_setor
+    // if (shiftId) {
+    //   query = query.eq('shift_id', shiftId);
+    // }
 
     const { data, error } = await query;
     if (error) throw error;
@@ -1958,7 +2383,8 @@ export const setoranCashKasirService = {
       .from('kop_setoran_cash_kasir')
       .insert({
         kasir_id: data.kasir_id,
-        shift_id: data.shift_id || null,
+        // Note: shift_id tidak ada di kop_setoran_cash_kasir, jadi kita skip
+        // shift_id: data.shift_id || null,
         jumlah_setor: data.jumlah_setor,
         total_penjualan_tunai_snapshot: data.total_penjualan_tunai_snapshot,
         total_setoran_sebelumnya: data.total_setoran_sebelumnya,

@@ -122,9 +122,9 @@ const EditHPPAndProfitSharingDialog: React.FC<EditHPPAndProfitSharingDialogProps
       toast.success('HPP dan bagi hasil berhasil diperbarui');
       onSuccess();
       onClose();
-    } catch (error: any) {
-      console.error('Error updating HPP and profit sharing:', error);
-      toast.error(`Gagal memperbarui: ${error.message || 'Unknown error'}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memperbarui';
+      toast.error(`Gagal memperbarui: ${errorMessage}`);
     } finally {
       setLoading(false);
     }

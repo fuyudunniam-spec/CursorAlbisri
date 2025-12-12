@@ -83,8 +83,7 @@ const LaporanKeuanganPage = () => {
         });
 
         if (error) {
-          console.error('Error calling get_laporan_keuangan_summary:', error);
-          throw error;
+          throw new Error(`Gagal memuat laporan keuangan: ${error.message}`);
         }
         
         // RPC returns array of rows, get first row
@@ -105,9 +104,9 @@ const LaporanKeuanganPage = () => {
           laba_kotor: 0,
           laba_bersih: 0,
         } as FinancialSummary;
-      } catch (err: any) {
-        console.error('Error in laporan keuangan query:', err);
-        toast.error('Gagal memuat laporan keuangan: ' + (err.message || 'Unknown error'));
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Gagal memuat laporan keuangan';
+        toast.error(errorMessage);
         throw err;
       }
     },

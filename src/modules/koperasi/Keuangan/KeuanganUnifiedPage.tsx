@@ -190,8 +190,8 @@ const KeuanganUnifiedPage: React.FC = () => {
       setMonthlyData(monthlyData);
       setCategoryData(categoryData);
       } catch (error) {
-      console.error('Error loading chart data:', error);
-      toast.error('Gagal memuat data chart');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data chart';
+      toast.error(errorMessage);
     }
   };
 
@@ -317,7 +317,12 @@ const KeuanganUnifiedPage: React.FC = () => {
 
       return { monthlyData, categoryData };
     } catch (error) {
-      console.error('Error loading chart data for date range:', error);
+      // Silent fail for chart data - return empty arrays
+      // Log only in development
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('Error loading chart data for date range:', error);
+      }
       return { monthlyData: [], categoryData: [] };
     }
   };
@@ -361,13 +366,79 @@ const KeuanganUnifiedPage: React.FC = () => {
       
       if (statsError) throw statsError;
       
-      const pemasukan = (transactionsInPeriod || [])
+      // Get processed months from koperasi_bagi_hasil_log
+      const { data: bagiHasilLogs } = await supabase
+        .from('koperasi_bagi_hasil_log')
+        .select('bulan, tahun, status')
+        .eq('status', 'processed');
+      
+      const processedMonths = new Set<string>();
+      (bagiHasilLogs || []).forEach((log: any) => {
+        if (log.bulan && log.tahun) {
+          processedMonths.add(`${log.tahun}-${String(log.bulan).padStart(2, '0')}`);
+        }
+      });
+      
+      const isDateProcessed = (date: string): boolean => {
+        const txDate = new Date(date);
+        const txYear = txDate.getFullYear();
+        const txMonth = String(txDate.getMonth() + 1).padStart(2, '0');
+        const monthKey = `${txYear}-${txMonth}`;
+        return processedMonths.has(monthKey);
+      };
+      
+      // Get all kop_penjualan IDs that contain yayasan items
+      const kopPenjualanIds = (transactionsInPeriod || [])
+        .filter(tx => tx.source_module === 'kop_penjualan' && tx.source_id)
+        .map(tx => tx.source_id);
+      
+      let yayasanPenjualanIds = new Set<string>();
+      if (kopPenjualanIds.length > 0) {
+        const { data: kopPenjualanDetails } = await supabase
+          .from('kop_penjualan_detail')
+          .select(`
+            penjualan_id,
+            kop_barang!inner(owner_type)
+          `)
+          .in('penjualan_id', kopPenjualanIds)
+          .eq('kop_barang.owner_type', 'yayasan');
+        
+        (kopPenjualanDetails || []).forEach((detail: any) => {
+          yayasanPenjualanIds.add(detail.penjualan_id);
+        });
+      }
+      
+      // Filter transactions: exclude unprocessed yayasan sales and Jasa Pengelolaan
+      const filteredTransactions = (transactionsInPeriod || []).filter(tx => {
+        // Exclude "Pemasukan" from kop_penjualan with yayasan items that haven't been processed
+        if (tx.jenis_transaksi === 'Pemasukan' && 
+            tx.kategori === 'Penjualan' &&
+            tx.source_module === 'kop_penjualan' &&
+            tx.source_id &&
+            yayasanPenjualanIds.has(tx.source_id)) {
+          if (!isDateProcessed(tx.tanggal)) {
+            return false; // Exclude unprocessed yayasan sales
+          }
+        }
+        
+        // Exclude "Jasa Pengelolaan" that hasn't been processed
+        if (tx.kategori === 'Jasa Pengelolaan' || 
+            tx.kategori === 'Jasa Pengelolaan Inventaris Yayasan') {
+          if (!isDateProcessed(tx.tanggal)) {
+            return false; // Exclude unprocessed Jasa Pengelolaan
+          }
+        }
+        
+        return true;
+      });
+      
+      const pemasukan = filteredTransactions
         .filter(tx => tx.jenis_transaksi === 'Pemasukan')
         .reduce((sum, tx) => sum + parseFloat(tx.jumlah || 0), 0);
       
       // Pengeluaran: EXCLUDE "Hutang ke Yayasan" dan liability entries
       // karena itu adalah kewajiban, bukan pengeluaran operasional
-      const pengeluaran = (transactionsInPeriod || [])
+      const pengeluaran = filteredTransactions
         .filter(tx => 
           tx.jenis_transaksi === 'Pengeluaran' &&
           tx.kategori !== 'Hutang ke Yayasan' &&
@@ -402,17 +473,59 @@ const KeuanganUnifiedPage: React.FC = () => {
         
         const { data: prevPeriodTransactions } = await prevPeriodQuery;
         
-        const pemasukanPrevPeriod = (prevPeriodTransactions || [])
+        // Filter previous period transactions similarly
+        const prevKopPenjualanIds = (prevPeriodTransactions || [])
+          .filter(tx => tx.source_module === 'kop_penjualan' && tx.source_id)
+          .map(tx => tx.source_id);
+        
+        let prevYayasanPenjualanIds = new Set<string>();
+        if (prevKopPenjualanIds.length > 0) {
+          const { data: prevKopPenjualanDetails } = await supabase
+            .from('kop_penjualan_detail')
+            .select(`
+              penjualan_id,
+              kop_barang!inner(owner_type)
+            `)
+            .in('penjualan_id', prevKopPenjualanIds)
+            .eq('kop_barang.owner_type', 'yayasan');
+          
+          (prevKopPenjualanDetails || []).forEach((detail: any) => {
+            prevYayasanPenjualanIds.add(detail.penjualan_id);
+          });
+        }
+        
+        const filteredPrevTransactions = (prevPeriodTransactions || []).filter(tx => {
+          if (tx.jenis_transaksi === 'Pemasukan' && 
+              tx.kategori === 'Penjualan' &&
+              tx.source_module === 'kop_penjualan' &&
+              tx.source_id &&
+              prevYayasanPenjualanIds.has(tx.source_id)) {
+            if (!isDateProcessed(tx.tanggal)) {
+              return false;
+            }
+          }
+          
+          if (tx.kategori === 'Jasa Pengelolaan' || 
+              tx.kategori === 'Jasa Pengelolaan Inventaris Yayasan') {
+            if (!isDateProcessed(tx.tanggal)) {
+              return false;
+            }
+          }
+          
+          return true;
+        });
+        
+        const pemasukanPrevPeriod = filteredPrevTransactions
           .filter(tx => tx.jenis_transaksi === 'Pemasukan')
           .reduce((sum, tx) => sum + parseFloat(tx.jumlah || 0), 0);
         
-      const pengeluaranPrevPeriod = (prevPeriodTransactions || [])
-        .filter(tx => 
-          tx.jenis_transaksi === 'Pengeluaran' &&
-          tx.kategori !== 'Hutang ke Yayasan' &&
-          !tx.referensi?.includes(':liability')
-        )
-        .reduce((sum, tx) => sum + parseFloat(tx.jumlah || 0), 0);
+        const pengeluaranPrevPeriod = filteredPrevTransactions
+          .filter(tx => 
+            tx.jenis_transaksi === 'Pengeluaran' &&
+            tx.kategori !== 'Hutang ke Yayasan' &&
+            !tx.referensi?.includes(':liability')
+          )
+          .reduce((sum, tx) => sum + parseFloat(tx.jumlah || 0), 0);
         
         pemasukanTrend = pemasukanPrevPeriod > 0 
           ? ((pemasukan - pemasukanPrevPeriod) / pemasukanPrevPeriod) * 100 
@@ -426,12 +539,17 @@ const KeuanganUnifiedPage: React.FC = () => {
       setStatistics({
         pemasukan_bulan_ini: pemasukan,
         pengeluaran_bulan_ini: pengeluaran,
-        transaksi_bulan_ini: transactionsInPeriod.length,
+        transaksi_bulan_ini: filteredTransactions.length,
         pemasukan_trend: pemasukanTrend,
         pengeluaran_trend: pengeluaranTrend
       });
     } catch (error) {
-      console.error('Error recalculating statistics:', error);
+      // Silent fail for statistics recalculation
+      // Log only in development
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('Error recalculating statistics:', error);
+      }
     }
   };
 
@@ -508,7 +626,12 @@ const KeuanganUnifiedPage: React.FC = () => {
       const laba = penjualan - totalHPP - bebanOperasional;
       setLabaPeriode(laba);
     } catch (error) {
-      console.error('Error calculating koperasi summary:', error);
+      // Silent fail for summary calculation
+      // Log only in development
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('Error calculating koperasi summary:', error);
+      }
     }
   };
 
@@ -521,7 +644,7 @@ const KeuanganUnifiedPage: React.FC = () => {
         .select('*');
 
       if (error) {
-        console.error('Error fetching hak yayasan:', error);
+        // Silent fail - set to 0
         setHakYayasanDiKas(0);
         return;
       }
@@ -544,8 +667,8 @@ const KeuanganUnifiedPage: React.FC = () => {
       }, 0);
 
       setHakYayasanDiKas(total);
-    } catch (error: any) {
-      console.error('Error loading hak yayasan:', error);
+    } catch (error) {
+      // Silent fail - set to 0
       setHakYayasanDiKas(0);
     }
   };
@@ -659,19 +782,93 @@ const KeuanganUnifiedPage: React.FC = () => {
         });
       }
       
-      // Filter out "Hutang ke Yayasan" and "Penjualan Inventaris" from main transaction list
-      // "Hutang ke Yayasan" adalah kewajiban/liability, bukan beban operasional
-      // "Penjualan Inventaris" seharusnya hanya muncul di modul penjualan, bukan di modul keuangan
-      // Transaksi ini seharusnya diproses melalui Kalkulator HPP & Bagi Hasil
+      // Filter out transactions that should not appear in operational transaction list:
+      // 1. "Hutang ke Yayasan" - kewajiban/liability, bukan beban operasional
+      // 2. "Penjualan Inventaris" - seharusnya diproses melalui Kalkulator HPP & Bagi Hasil
+      // 3. "Pemasukan" dari penjualan item yayasan yang belum diproses di kalkulator bagi hasil
+      // 4. "Jasa Pengelolaan" yang belum diproses di kalkulator bagi hasil
+      
+      // Get all processed sales from koperasi_bagi_hasil_log
+      const { data: bagiHasilLogs } = await supabase
+        .from('koperasi_bagi_hasil_log')
+        .select('bulan, tahun, status')
+        .eq('status', 'processed');
+      
+      // Create a set of processed month-year combinations
+      const processedMonths = new Set<string>();
+      (bagiHasilLogs || []).forEach((log: any) => {
+        if (log.bulan && log.tahun) {
+          processedMonths.add(`${log.tahun}-${String(log.bulan).padStart(2, '0')}`);
+        }
+      });
+      
+      // Helper function to check if a date is within any processed month
+      const isDateProcessed = (date: string): boolean => {
+        const txDate = new Date(date);
+        const txYear = txDate.getFullYear();
+        const txMonth = String(txDate.getMonth() + 1).padStart(2, '0');
+        const monthKey = `${txYear}-${txMonth}`;
+        return processedMonths.has(monthKey);
+      };
+      
+      // Get all kop_penjualan IDs that contain yayasan items
+      const kopPenjualanIds = allTransactions
+        .filter(tx => tx.source_module === 'kop_penjualan' && tx.source_id)
+        .map(tx => tx.source_id);
+      
+      let yayasanPenjualanIds = new Set<string>();
+      if (kopPenjualanIds.length > 0) {
+        const { data: kopPenjualanDetails } = await supabase
+          .from('kop_penjualan_detail')
+          .select(`
+            penjualan_id,
+            kop_barang!inner(owner_type)
+          `)
+          .in('penjualan_id', kopPenjualanIds)
+          .eq('kop_barang.owner_type', 'yayasan');
+        
+        (kopPenjualanDetails || []).forEach((detail: any) => {
+          yayasanPenjualanIds.add(detail.penjualan_id);
+        });
+      }
+      
       const operationalTransactions = allTransactions.filter(tx => {
+        // Filter out liabilities
         const isLiability = tx.kategori === 'Hutang ke Yayasan' ||
+                           tx.kategori === 'Kewajiban' ||
                            tx.referensi?.includes(':liability') ||
                            tx.deskripsi?.toLowerCase().includes('kewajiban');
+        if (isLiability) return false;
+        
+        // Filter out inventory sales (transaksi_inventaris)
         const isInventorySale = tx.kategori === 'Penjualan Inventaris' ||
                               tx.kategori === 'Penjualan Inventaris Yayasan' ||
                               tx.referensi?.startsWith('transaksi_inventaris:') ||
                               tx.referensi?.startsWith('inventory_sale:');
-        return !isLiability && !isInventorySale;
+        if (isInventorySale) return false;
+        
+        // Filter out "Pemasukan" from kop_penjualan with yayasan items that haven't been processed
+        if (tx.jenis_transaksi === 'Pemasukan' && 
+            tx.kategori === 'Penjualan' &&
+            tx.source_module === 'kop_penjualan' &&
+            tx.source_id &&
+            yayasanPenjualanIds.has(tx.source_id)) {
+          // Check if this sale date is within a processed range
+          if (!isDateProcessed(tx.tanggal)) {
+            return false; // Hide unprocessed yayasan sales
+          }
+        }
+        
+        // Filter out "Jasa Pengelolaan" that hasn't been processed
+        if (tx.kategori === 'Jasa Pengelolaan' || 
+            tx.kategori === 'Jasa Pengelolaan Inventaris Yayasan') {
+          // Check if this transaction date is within a processed range
+          if (!isDateProcessed(tx.tanggal)) {
+            return false; // Hide unprocessed Jasa Pengelolaan
+          }
+        }
+        
+        return true;
       });
       
       // Store filtered transactions for RiwayatTransaksi (it will filter based on dateFilter)
@@ -687,8 +884,8 @@ const KeuanganUnifiedPage: React.FC = () => {
       // We need to wait for state to update, so we'll call it in a separate effect
       
     } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Gagal memuat data keuangan koperasi');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data keuangan koperasi';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -739,7 +936,7 @@ const KeuanganUnifiedPage: React.FC = () => {
         .limit(100);
 
       if (error) {
-        console.error('Error fetching unprocessed sales:', error);
+        // Silent fail - return empty
         return;
       }
 
@@ -788,7 +985,12 @@ const KeuanganUnifiedPage: React.FC = () => {
         setUnprocessedSalesSummary({ total: 0, count: 0 });
       }
     } catch (error) {
-      console.error('Error loading unprocessed sales:', error);
+      // Silent fail - unprocessed sales are optional
+      // Log only in development
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('Error loading unprocessed sales:', error);
+      }
     }
   };
 
@@ -874,8 +1076,8 @@ const KeuanganUnifiedPage: React.FC = () => {
         await loadData();
         await loadChartData(selectedAccountFilter);
       } catch (error) {
-        console.error('Error deleting transaction:', error);
-        toast.error('Gagal menghapus transaksi');
+        const errorMessage = error instanceof Error ? error.message : 'Gagal menghapus transaksi';
+        toast.error(errorMessage);
       }
     }
   };

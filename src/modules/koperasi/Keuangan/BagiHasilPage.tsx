@@ -106,7 +106,6 @@ const BagiHasilPage = () => {
         .single();
 
       if (kasError) {
-        console.error('Error loading Kas Koperasi:', kasError);
         toast.error('Akun Kas Koperasi tidak ditemukan');
         return;
       }
@@ -118,8 +117,8 @@ const BagiHasilPage = () => {
       ]);
 
     } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Gagal memuat data bagi hasil');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data bagi hasil';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -144,8 +143,8 @@ const BagiHasilPage = () => {
 
       setMonthlySummaries(sortedData);
     } catch (error) {
-      console.error('Error loading monthly summaries:', error);
-      toast.error('Gagal memuat ringkasan bulanan');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat ringkasan bulanan';
+      toast.error(errorMessage);
     }
   };
 
@@ -183,8 +182,8 @@ const BagiHasilPage = () => {
       setTransactions(transformedTx);
 
     } catch (error) {
-      console.error('Error loading filtered transactions:', error);
-      toast.error('Gagal memuat data transaksi');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data transaksi';
+      toast.error(errorMessage);
     }
   };
 
@@ -227,9 +226,9 @@ const BagiHasilPage = () => {
 
       setShowPaymentDialog(false);
       setSelectedSummary(null);
-    } catch (error: any) {
-      console.error('Error processing payment:', error);
-      toast.error(error.message || 'Gagal memproses pembayaran');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memproses pembayaran';
+      toast.error(errorMessage);
     } finally {
       setProcessingPayment(false);
     }

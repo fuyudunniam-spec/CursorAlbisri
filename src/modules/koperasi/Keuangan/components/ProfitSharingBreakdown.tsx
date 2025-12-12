@@ -65,8 +65,7 @@ const ProfitSharingBreakdown = ({ startDate, endDate }: ProfitSharingBreakdownPr
         .lte('tahun', endYear);
 
       if (error) {
-        console.error('Error fetching bagi hasil log:', error);
-        throw error;
+        throw new Error(`Gagal memuat data bagi hasil: ${error.message}`);
       }
 
       // Sort data by tahun and bulan (client-side since Supabase doesn't support multiple order)
@@ -113,8 +112,8 @@ const ProfitSharingBreakdown = ({ startDate, endDate }: ProfitSharingBreakdownPr
       setTotalData(totals);
 
     } catch (error) {
-      console.error('Error loading profit sharing data:', error);
-      toast.error('Gagal memuat data bagi hasil');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat data bagi hasil';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
