@@ -10,7 +10,7 @@ import { X, Save } from 'lucide-react';
 import { createInventoryItem, updateInventoryItem } from '@/services/inventaris.service';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { getKategoriOptions, SATUAN_OPTIONS, ZONA_OPTIONS } from '@/utils/inventaris.utils';
+import { getKategoriOptions, SATUAN_OPTIONS, ZONA_OPTIONS, normalizeKondisi } from '@/utils/inventaris.utils';
 
 interface ItemFormProps {
   onClose: () => void;
@@ -24,7 +24,7 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
     kategori: editItem?.kategori || '',
     zona: editItem?.zona || '',
     lokasi: editItem?.lokasi || '',
-    kondisi: editItem?.kondisi || 'Baik',
+    kondisi: normalizeKondisi(editItem?.kondisi) || 'Baik',
     jumlah: editItem?.jumlah || '',
     satuan: editItem?.satuan || 'pcs',
     harga_perolehan: editItem?.harga_perolehan || '',
@@ -179,10 +179,7 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Baik">Baik</SelectItem>
-                    <SelectItem value="Rusak Ringan">Rusak Ringan</SelectItem>
-                    <SelectItem value="Perlu Perbaikan">Perlu Perbaikan</SelectItem>
-                    <SelectItem value="Rusak Berat">Rusak Berat</SelectItem>
-                    <SelectItem value="Butuh Perbaikan">Butuh Perbaikan</SelectItem>
+                    <SelectItem value="Perlu perbaikan">Perlu perbaikan</SelectItem>
                     <SelectItem value="Rusak">Rusak</SelectItem>
                   </SelectContent>
                 </Select>
@@ -255,22 +252,6 @@ const ItemForm = ({ onClose, editItem }: ItemFormProps) => {
                   onChange={(e) => setFormData({...formData, min_stock: e.target.value})}
                   placeholder="0"
                 />
-              </div>
-
-              <div>
-                <Label htmlFor="owner_type">Sumber / Owner *</Label>
-                <Select
-                  value={formData.owner_type}
-                  onValueChange={(value) => setFormData({ ...formData, owner_type: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih sumber barang" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="yayasan">Yayasan</SelectItem>
-                    <SelectItem value="koperasi">Koperasi</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
 

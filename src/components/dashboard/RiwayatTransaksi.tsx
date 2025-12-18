@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Filter, MoreHorizontal, Eye, Edit, Trash2, ArrowUpRight, ArrowDownLeft, X, Calendar, FileText } from 'lucide-react';
+import { Search, Edit, Trash2, ArrowUpRight, ArrowDownLeft, X, Calendar, CheckSquare, Square } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
-import { cn } from '@/lib/utils';
 
 interface Transaction {
   id: string;
@@ -31,6 +33,7 @@ interface Transaction {
   auto_posted?: boolean;
   source_module?: string;
   referensi?: string;
+  is_pengeluaran_riil?: boolean; // Baru: untuk tracking nominal vs pengeluaran riil
 }
 
 // Helper function to extract source from referensi or kategori
@@ -83,6 +86,15 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [sortBy, setSortBy] = useState<string>('tanggal');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  
+  // Batch selection states
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const [showBatchEditDialog, setShowBatchEditDialog] = useState(false);
+  const [batchEditData, setBatchEditData] = useState({
+    kategori: '',
+    sub_kategori: ''
+  });
+  const [isBatchUpdating, setIsBatchUpdating] = useState(false);
   
   // Date filter states - sync with parent if provided
   // Default to 'all' if no initialDateFilter provided, otherwise use initialDateFilter
@@ -392,6 +404,119 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
     }
   };
 
+  // Handle select/deselect transaction
+  const handleSelectTransaction = (transactionId: string) => {
+    setSelectedTransactions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(transactionId)) {
+        newSet.delete(transactionId);
+      } else {
+        newSet.add(transactionId);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle select all
+  const handleSelectAll = () => {
+    if (selectedTransactions.size === currentTransactions.length) {
+      setSelectedTransactions(new Set());
+    } else {
+      setSelectedTransactions(new Set(currentTransactions.map(t => t.id)));
+    }
+  };
+
+  // Handle batch edit
+  const handleBatchEdit = async () => {
+    if (selectedTransactions.size === 0) {
+      toast.error('Pilih minimal 1 transaksi');
+      return;
+    }
+
+    if (!batchEditData.kategori) {
+      toast.error('Pilih kategori terlebih dahulu');
+      return;
+    }
+
+    try {
+      setIsBatchUpdating(true);
+      const transactionIds = Array.from(selectedTransactions);
+      
+      // Filter transactions yang bisa di-edit (bukan auto-posted)
+      const editableTransactions = currentTransactions.filter(t => 
+        transactionIds.includes(t.id) &&
+        !t.auto_posted &&
+        !t.referensi?.startsWith('inventory_sale:') &&
+        !t.referensi?.startsWith('inventaris:') &&
+        !t.referensi?.startsWith('donation:') &&
+        !t.referensi?.startsWith('donasi:') &&
+        !t.referensi?.startsWith('pembayaran_santri:') &&
+        t.kategori !== 'Penjualan Inventaris'
+      );
+
+      if (editableTransactions.length === 0) {
+        toast.error('Tidak ada transaksi yang bisa di-edit. Transaksi auto-posted tidak bisa diubah.');
+        return;
+      }
+
+      const updateData: any = {
+        kategori: batchEditData.kategori
+      };
+
+      // Hanya update sub_kategori jika diisi
+      if (batchEditData.sub_kategori) {
+        updateData.sub_kategori = batchEditData.sub_kategori;
+      }
+
+      // Update transactions
+      const { error } = await supabase
+        .from('keuangan')
+        .update(updateData)
+        .in('id', editableTransactions.map(t => t.id));
+
+      if (error) throw error;
+
+      // Jika kategori diubah menjadi "Operasional Yayasan", hapus semua alokasi
+      // karena kategori ini tidak dialokasikan ke santri
+      if (updateData.kategori === 'Operasional Yayasan') {
+        const { error: deleteAlokasiError } = await supabase
+          .from('alokasi_pengeluaran_santri')
+          .delete()
+          .in('keuangan_id', editableTransactions.map(t => t.id));
+
+        if (deleteAlokasiError) {
+          // Failed to delete alokasi, but main update already succeeded
+          // Error is non-critical, continue silently
+        }
+      }
+      // Jika kategori adalah "Operasional dan Konsumsi Santri" dan ada sub_kategori,
+      // update juga jenis_bantuan di alokasi_pengeluaran_santri
+      else if (updateData.kategori === 'Operasional dan Konsumsi Santri' && updateData.sub_kategori) {
+        const { error: alokasiError } = await supabase
+          .from('alokasi_pengeluaran_santri')
+          .update({ jenis_bantuan: updateData.sub_kategori })
+          .in('keuangan_id', editableTransactions.map(t => t.id))
+          .eq('alokasi_ke', 'asrama_konsumsi');
+
+        if (alokasiError) {
+          // Failed to update jenis_bantuan, but main update already succeeded
+          // Error is non-critical, continue silently
+        }
+      }
+
+      toast.success(`Berhasil mengupdate ${editableTransactions.length} transaksi`);
+      setShowBatchEditDialog(false);
+      setSelectedTransactions(new Set());
+      setBatchEditData({ kategori: '', sub_kategori: '' });
+      
+      // Refresh page
+      window.location.reload();
+    } catch (error: any) {
+      toast.error('Gagal mengupdate transaksi: ' + (error.message || 'Unknown error'));
+    } finally {
+      setIsBatchUpdating(false);
+    }
+  };
 
   return (
     <Card className="rounded-lg border border-gray-200 shadow-sm bg-white">
@@ -613,7 +738,17 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="w-10 px-3 py-3 text-left">
-                        <input type="checkbox" className="rounded border-gray-300" />
+                        <button
+                          onClick={handleSelectAll}
+                          className="flex items-center justify-center"
+                          title={selectedTransactions.size === currentTransactions.length ? "Batal pilih semua" : "Pilih semua"}
+                        >
+                          {selectedTransactions.size === currentTransactions.length && currentTransactions.length > 0 ? (
+                            <CheckSquare className="h-4 w-4 text-blue-600" />
+                          ) : (
+                            <Square className="h-4 w-4 text-gray-400" />
+                          )}
+                        </button>
                       </th>
                       <th 
                         className="px-3 py-3 text-left text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-900"
@@ -674,7 +809,48 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                           }`}
                         >
                           <td className="px-3 py-3 whitespace-nowrap">
-                            <input type="checkbox" className="rounded border-gray-300" />
+                            <button
+                              onClick={() => handleSelectTransaction(transaction.id)}
+                              className="flex items-center justify-center"
+                              disabled={
+                                transaction.auto_posted ||
+                                transaction.referensi?.startsWith('inventory_sale:') ||
+                                transaction.referensi?.startsWith('inventaris:') ||
+                                transaction.referensi?.startsWith('donation:') ||
+                                transaction.referensi?.startsWith('donasi:') ||
+                                transaction.referensi?.startsWith('pembayaran_santri:') ||
+                                transaction.kategori === 'Penjualan Inventaris'
+                              }
+                              title={
+                                transaction.auto_posted ||
+                                transaction.referensi?.startsWith('inventory_sale:') ||
+                                transaction.referensi?.startsWith('inventaris:') ||
+                                transaction.referensi?.startsWith('donation:') ||
+                                transaction.referensi?.startsWith('donasi:') ||
+                                transaction.referensi?.startsWith('pembayaran_santri:') ||
+                                transaction.kategori === 'Penjualan Inventaris'
+                                  ? "Transaksi ini tidak bisa di-edit"
+                                  : selectedTransactions.has(transaction.id)
+                                  ? "Batal pilih"
+                                  : "Pilih"
+                              }
+                            >
+                              {selectedTransactions.has(transaction.id) ? (
+                                <CheckSquare className="h-4 w-4 text-blue-600" />
+                              ) : (
+                                <Square className={`h-4 w-4 ${
+                                  transaction.auto_posted ||
+                                  transaction.referensi?.startsWith('inventory_sale:') ||
+                                  transaction.referensi?.startsWith('inventaris:') ||
+                                  transaction.referensi?.startsWith('donation:') ||
+                                  transaction.referensi?.startsWith('donasi:') ||
+                                  transaction.referensi?.startsWith('pembayaran_santri:') ||
+                                  transaction.kategori === 'Penjualan Inventaris'
+                                    ? 'text-gray-300 cursor-not-allowed'
+                                    : 'text-gray-400 hover:text-gray-600'
+                                }`} />
+                              )}
+                            </button>
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap">
                             <div className="flex items-center gap-2">
@@ -704,6 +880,11 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                               {transaction.referensi?.startsWith('pembayaran_santri:') && (
                                 <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 border-green-200">
                                   Pembayaran
+                                </Badge>
+                              )}
+                              {transaction.kategori === 'Pendidikan Pesantren' && transaction.is_pengeluaran_riil === false && (
+                                <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-800 border-purple-200">
+                                  Beasiswa
                                 </Badge>
                               )}
                             </div>
@@ -832,6 +1013,11 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                               Pembayaran
                             </Badge>
                           )}
+                          {transaction.kategori === 'Pendidikan Pesantren' && transaction.is_pengeluaran_riil === false && (
+                            <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-800 border-purple-200">
+                              Beasiswa
+                            </Badge>
+                          )}
                         </div>
                       </div>
 
@@ -929,6 +1115,106 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
           </div>
         </div>
       </CardContent>
+
+      {/* Batch Edit Dialog */}
+      <Dialog open={showBatchEditDialog} onOpenChange={setShowBatchEditDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Bersama {selectedTransactions.size} Transaksi</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="batch_kategori">Kategori *</Label>
+              <Select 
+                value={batchEditData.kategori} 
+                onValueChange={(value) => setBatchEditData(prev => ({ ...prev, kategori: value, sub_kategori: '' }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih kategori" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Pendidikan Pesantren">Pendidikan Pesantren</SelectItem>
+                  <SelectItem value="Pendidikan Formal">Pendidikan Formal</SelectItem>
+                  <SelectItem value="Operasional dan Konsumsi Santri">Operasional dan Konsumsi Santri</SelectItem>
+                  <SelectItem value="Bantuan Langsung Yayasan">Bantuan Langsung Yayasan</SelectItem>
+                  <SelectItem value="Operasional Yayasan">Operasional Yayasan</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="batch_sub_kategori">Sub Kategori</Label>
+              {batchEditData.kategori === 'Operasional dan Konsumsi Santri' ? (
+                <Select 
+                  value={batchEditData.sub_kategori} 
+                  onValueChange={(value) => setBatchEditData(prev => ({ ...prev, sub_kategori: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih sub kategori (opsional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Kosongkan</SelectItem>
+                    <SelectItem value="Konsumsi">Konsumsi</SelectItem>
+                    <SelectItem value="Operasional">Operasional</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : batchEditData.kategori === 'Operasional Yayasan' ? (
+                <Select 
+                  value={batchEditData.sub_kategori} 
+                  onValueChange={(value) => setBatchEditData(prev => ({ ...prev, sub_kategori: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih sub kategori (opsional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Kosongkan</SelectItem>
+                    <SelectItem value="Gaji & Honor">Gaji & Honor</SelectItem>
+                    <SelectItem value="Utilitas">Utilitas</SelectItem>
+                    <SelectItem value="Maintenance">Maintenance</SelectItem>
+                    <SelectItem value="Administrasi">Administrasi</SelectItem>
+                    <SelectItem value="Lain-lain">Lain-lain</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="batch_sub_kategori"
+                  value={batchEditData.sub_kategori}
+                  onChange={(e) => setBatchEditData(prev => ({ ...prev, sub_kategori: e.target.value }))}
+                  placeholder="Sub kategori (opsional)"
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                Kosongkan jika tidak ingin mengubah sub kategori
+              </p>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
+              <p className="text-xs text-amber-800">
+                <strong>Catatan:</strong> Hanya transaksi yang bisa di-edit yang akan diupdate. 
+                Transaksi auto-posted (dari donasi, inventaris, pembayaran santri) akan dilewati.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowBatchEditDialog(false);
+                setBatchEditData({ kategori: '', sub_kategori: '' });
+              }}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleBatchEdit}
+              disabled={isBatchUpdating || !batchEditData.kategori}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isBatchUpdating ? 'Mengupdate...' : `Update ${selectedTransactions.size} Transaksi`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

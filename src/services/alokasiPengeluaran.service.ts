@@ -10,6 +10,8 @@ export interface AlokasiPengeluaranSantri {
   jenis_bantuan: string;
   periode: string;
   keterangan?: string;
+  tipe_alokasi?: 'pengeluaran_riil' | 'tracking_nominal';
+  alokasi_ke?: 'formal' | 'pesantren' | 'asrama_konsumsi' | 'bantuan_langsung';
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +36,8 @@ export interface CreateAlokasiData {
   jenis_bantuan: string;
   periode: string;
   keterangan?: string;
+  tipe_alokasi?: 'pengeluaran_riil' | 'tracking_nominal';
+  alokasi_ke?: 'formal' | 'pesantren' | 'asrama_konsumsi' | 'bantuan_langsung';
 }
 
 export interface BatchAllocationData {

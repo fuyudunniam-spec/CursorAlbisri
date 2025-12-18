@@ -1,13 +1,12 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts';
 import { FileX, TrendingDown } from 'lucide-react';
-import { InventoryMonthlyData, InventoryCategoryData } from '@/services/inventarisDashboard.service';
+import { InventoryMonthlyData, InventoryConditionData } from '@/services/inventarisDashboard.service';
 
 interface InventoryChartsSectionProps {
   monthlyData?: InventoryMonthlyData[];
-  categoryData?: InventoryCategoryData[];
+  categoryData?: InventoryConditionData[]; // Now using condition data
 }
 
 const EmptyStateCard: React.FC<{ 
@@ -44,28 +43,23 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
   monthlyData = [], 
   categoryData = []
 }) => {
+  // Check if we have data for transaction chart (masuk, koperasi, dapur, distribusi_bantuan)
   const hasMonthlyData = monthlyData.length > 0 && 
-    monthlyData.some(d => (d.masuk > 0 || d.keluar > 0));
-  const hasCategoryData = categoryData.length > 0 && 
+    monthlyData.some(d => (d.masuk > 0 || d.koperasi > 0 || d.dapur > 0 || d.distribusi_bantuan > 0));
+  
+  // Check if we have condition data
+  const hasConditionData = categoryData.length > 0 && 
     categoryData.some(c => c.value > 0);
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-white p-3 border rounded-lg shadow-lg">
-          <p className="font-medium mb-2">{label}</p>
+        <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+          <p className="font-semibold mb-2 text-gray-900">{label}</p>
           {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }} className="mb-1">
-              {entry.name}: {entry.value} transaksi
+            <p key={index} className="text-sm mb-1" style={{ color: entry.color }}>
+              <span className="font-medium">{entry.name}:</span>{' '}
+              <span className="text-gray-700">{entry.value.toLocaleString('id-ID')} unit</span>
             </p>
           ))}
         </div>
@@ -74,13 +68,26 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
     return null;
   };
 
+  const ConditionTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0];
+      return (
+        <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+          <p className="font-semibold mb-1 text-gray-900">{data.name}</p>
+          <p className="text-sm text-gray-700">{data.value.toLocaleString('id-ID')} item</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Monthly Transaction Chart */}
+      {/* Monthly Transaction Chart - Tujuan Pengeluaran */}
       {!hasMonthlyData ? (
         <EmptyStateCard 
           title="Ringkasan Transaksi" 
-          message="Pergerakan transaksi inventaris per bulan"
+          message="Tujuan pengeluaran inventaris per bulan"
           icon={<TrendingDown className="w-8 h-8 text-gray-400" />}
         />
       ) : (
@@ -88,49 +95,61 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
           <CardHeader className="pb-4 pt-4 px-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-medium text-gray-900">Ringkasan Transaksi</CardTitle>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Pergerakan transaksi inventaris bulanan
+                <CardTitle className="text-sm font-semibold text-gray-900">Ringkasan Transaksi</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Tujuan pengeluaran inventaris per bulan
                 </p>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-5">
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                <LineChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                   <defs>
                     <linearGradient id="colorMasuk" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.1}/>
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.05}/>
                     </linearGradient>
-                    <linearGradient id="colorKeluar" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.1}/>
+                    <linearGradient id="colorKoperasi" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05}/>
+                    </linearGradient>
+                    <linearGradient id="colorDapur" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05}/>
+                    </linearGradient>
+                    <linearGradient id="colorDistribusi" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.05}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
                   <XAxis 
                     dataKey="month" 
-                    stroke="#6b7280"
-                    style={{ fontSize: '12px' }}
+                    tick={{ fontSize: 11, fill: '#9ca3af' }}
+                    axisLine={false}
+                    tickLine={false}
                   />
                   <YAxis 
-                    stroke="#6b7280"
-                    style={{ fontSize: '12px' }}
+                    tick={{ fontSize: 11, fill: '#9ca3af' }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(value) => value.toLocaleString('id-ID')}
                   />
                   <Tooltip 
                     content={<CustomTooltip />}
                     contentStyle={{ 
-                      backgroundColor: 'white', 
+                      backgroundColor: '#fff',
                       border: '1px solid #e5e7eb',
                       borderRadius: '8px',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
                     }}
+                    labelStyle={{ color: '#374151', fontWeight: 600 }}
                   />
                   <Legend 
-                    wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
-                    iconType="circle"
+                    wrapperStyle={{ fontSize: '11px', paddingTop: '16px' }}
+                    iconType="line"
                   />
                   <Area 
                     type="monotone" 
@@ -139,31 +158,48 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
                     strokeWidth={2}
                     fill="url(#colorMasuk)"
                     name="Masuk"
-                    dot={{ fill: 'white', stroke: '#10b981', strokeWidth: 2, r: 4 }}
+                    dot={{ fill: '#10b981', r: 4 }}
                     activeDot={{ r: 6 }}
                   />
-                  <Area 
-                    type="monotone" 
-                    dataKey="keluar" 
-                    stroke="#ef4444" 
+                  <Line 
+                    type="monotone"
+                    dataKey="koperasi"
+                    stroke="#3b82f6"
                     strokeWidth={2}
-                    fill="url(#colorKeluar)"
-                    name="Keluar"
-                    dot={{ fill: 'white', stroke: '#ef4444', strokeWidth: 2, r: 4 }}
+                    dot={{ fill: '#3b82f6', r: 4 }}
                     activeDot={{ r: 6 }}
+                    name="Koperasi"
                   />
-                </AreaChart>
+                  <Line 
+                    type="monotone"
+                    dataKey="dapur"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    dot={{ fill: '#f59e0b', r: 4 }}
+                    activeDot={{ r: 6 }}
+                    name="Dapur"
+                  />
+                  <Line 
+                    type="monotone"
+                    dataKey="distribusi_bantuan"
+                    stroke="#8b5cf6"
+                    strokeWidth={2}
+                    dot={{ fill: '#8b5cf6', r: 4 }}
+                    activeDot={{ r: 6 }}
+                    name="Distribusi Bantuan"
+                  />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Category Distribution Chart */}
-      {!hasCategoryData ? (
+      {/* Condition Distribution Chart */}
+      {!hasConditionData ? (
         <EmptyStateCard 
-          title="Distribusi Kategori" 
-          message="Distribusi inventaris berdasarkan kategori"
+          title="Distribusi Kondisi" 
+          message="Distribusi inventaris berdasarkan kondisi barang"
           icon={<FileX className="w-8 h-8 text-gray-400" />}
         />
       ) : (
@@ -171,21 +207,21 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
           <CardHeader className="pb-4 pt-4 px-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-medium text-gray-900">Distribusi Kategori</CardTitle>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Berdasarkan kategori inventaris
+                <CardTitle className="text-sm font-semibold text-gray-900">Distribusi Kondisi</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Berdasarkan kondisi barang inventaris
                 </p>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-5">
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={categoryData.map(cat => ({
-                      ...cat,
-                      payload: cat
+                    data={categoryData.map(cond => ({
+                      ...cond,
+                      payload: cond
                     }))}
                     cx="50%"
                     cy="50%"
@@ -199,31 +235,26 @@ const InventoryChartsSection: React.FC<InventoryChartsSectionProps> = ({
                     ))}
                   </Pie>
                   <Tooltip 
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0];
-                        return (
-                          <div className="bg-white p-3 border rounded-lg shadow-lg">
-                            <p className="font-medium mb-1">{data.name}</p>
-                            <p className="text-sm">{data.value} unit</p>
-                          </div>
-                        );
-                      }
-                      return null;
+                    content={<ConditionTooltip />}
+                    contentStyle={{ 
+                      backgroundColor: '#fff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
                     }}
                   />
                 </PieChart>
               </ResponsiveContainer>
             </div>
             <div className="mt-6 grid grid-cols-2 gap-3">
-              {categoryData.map((category, index) => (
+              {categoryData.map((condition, index) => (
                 <div key={index} className="flex items-center space-x-2">
                   <div 
                     className="w-3 h-3 rounded-full flex-shrink-0" 
-                    style={{ backgroundColor: category.color }}
+                    style={{ backgroundColor: condition.color }}
                   />
-                  <span className="text-sm text-muted-foreground truncate">
-                    {category.name}: {category.value} unit
+                  <span className="text-sm text-gray-600 truncate">
+                    {condition.name}: <span className="font-medium">{condition.value.toLocaleString('id-ID')}</span> item
                   </span>
                 </div>
               ))}

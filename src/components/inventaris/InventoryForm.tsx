@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useCreateInventoryItem, useUpdateInventoryItem } from "@/hooks/useInventory";
-import { formatRupiah, parseRupiah, getKategoriOptions, ZONA_OPTIONS, SATUAN_OPTIONS, getContohNamaBarang, CONTOH_NAMA_BARANG_BY_CATEGORY } from "@/utils/inventaris.utils";
+import { formatRupiah, parseRupiah, getKategoriOptions, ZONA_OPTIONS, SATUAN_OPTIONS, getContohNamaBarang, CONTOH_NAMA_BARANG_BY_CATEGORY, normalizeKondisi } from "@/utils/inventaris.utils";
 
 const inventorySchema = z.object({
   nama_barang: z.string().min(3, "Nama barang minimal 3 karakter").max(100, "Nama barang maksimal 100 karakter"),
@@ -18,7 +18,7 @@ const inventorySchema = z.object({
   kategori: z.string().min(1, "Kategori wajib dipilih"),
   zona: z.enum(["Gedung Putra", "Gedung Putri", "Area luar"], { errorMap: () => ({ message: "Pilih zona yang valid" }) }),
   lokasi: z.string().min(1, "Lokasi wajib diisi"),
-  kondisi: z.enum(["Baik", "Butuh Perbaikan", "Rusak", "Rusak Ringan", "Perlu Perbaikan", "Rusak Berat"], { errorMap: () => ({ message: "Pilih kondisi yang valid" }) }),
+  kondisi: z.enum(["Baik", "Perlu perbaikan", "Rusak"], { errorMap: () => ({ message: "Pilih kondisi yang valid" }) }),
   jumlah: z.number().int("Jumlah harus berupa bilangan bulat").min(0, "Jumlah tidak boleh negatif"),
   satuan: z.string().min(1, "Satuan wajib diisi"),
   harga_perolehan: z.number().min(0, "Harga tidak boleh negatif").optional(),
@@ -78,7 +78,7 @@ const InventoryForm = memo(({ isOpen, onClose, editingItem }: Props) => {
         kategori: editingItem.kategori || "",
         zona: editingItem.zona || "Gedung Putra",
         lokasi: editingItem.lokasi || "",
-        kondisi: editingItem.kondisi || "Baik",
+        kondisi: editingItem.kondisi ? normalizeKondisi(editingItem.kondisi) : "Baik",
         jumlah: editingItem.jumlah || 0,
         satuan: editingItem.satuan || "pcs",
         harga_perolehan: editingItem.harga_perolehan || 0,
@@ -221,11 +221,8 @@ const InventoryForm = memo(({ isOpen, onClose, editingItem }: Props) => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Baik">Baik</SelectItem>
-                  <SelectItem value="Butuh Perbaikan">Butuh Perbaikan</SelectItem>
+                  <SelectItem value="Perlu perbaikan">Perlu perbaikan</SelectItem>
                   <SelectItem value="Rusak">Rusak</SelectItem>
-                  <SelectItem value="Rusak Ringan">Rusak Ringan</SelectItem>
-                  <SelectItem value="Rusak Berat">Rusak Berat</SelectItem>
-                  <SelectItem value="Perlu Perbaikan">Perlu Perbaikan</SelectItem>
                 </SelectContent>
               </Select>
               {form.formState.errors.kondisi && (

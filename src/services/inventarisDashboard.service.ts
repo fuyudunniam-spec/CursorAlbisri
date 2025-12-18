@@ -32,13 +32,22 @@ export interface PendingDonation {
 export interface InventoryMonthlyData {
   month: string;
   masuk: number;
-  keluar: number;
+  koperasi: number;
+  dapur: number;
+  distribusi_bantuan: number;
   stocktake: number;
   fromDonation: number;
   fromPurchase: number;
 }
 
 export interface InventoryCategoryData {
+  name: string;
+  value: number;
+  color: string;
+  itemCount: number;
+}
+
+export interface InventoryConditionData {
   name: string;
   value: number;
   color: string;
@@ -286,11 +295,12 @@ export const getPendingDonations = async (): Promise<PendingDonation[]> => {
 
 /**
  * Get monthly inventory transaction data for charts
+ * Menampilkan tujuan pengeluaran: koperasi, dapur, distribusi bantuan
  */
 export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]> => {
   const { data: transactions, error } = await supabase
     .from('transaksi_inventaris')
-    .select('tipe, tanggal, masuk_mode')
+    .select('tipe, tanggal, masuk_mode, keluar_mode, channel, jumlah, penerima')
     .order('tanggal', { ascending: true });
 
   if (error) {
@@ -303,7 +313,9 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
     sortKey: string;
     displayMonth: string;
     masuk: number;
-    keluar: number;
+    koperasi: number;
+    dapur: number;
+    distribusi_bantuan: number;
     stocktake: number;
     fromDonation: number;
     fromPurchase: number;
@@ -320,7 +332,9 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
         sortKey,
         displayMonth,
         masuk: 0,
-        keluar: 0,
+        koperasi: 0,
+        dapur: 0,
+        distribusi_bantuan: 0,
         stocktake: 0,
         fromDonation: 0,
         fromPurchase: 0
@@ -328,16 +342,25 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
     }
 
     const monthData = monthlyMap.get(sortKey)!;
+    const qty = parseFloat(tx.jumlah?.toString() || '0');
     
     if (tx.tipe === 'Masuk') {
-      monthData.masuk += 1;
+      monthData.masuk += qty;
       if (tx.masuk_mode === 'Donasi') {
-        monthData.fromDonation += 1;
+        monthData.fromDonation += qty;
       } else if (tx.masuk_mode === 'Pembelian') {
-        monthData.fromPurchase += 1;
+        monthData.fromPurchase += qty;
       }
     } else if (tx.tipe === 'Keluar') {
-      monthData.keluar += 1;
+      // Kategorisasi berdasarkan channel atau keluar_mode untuk kompatibilitas
+      if (tx.channel === 'koperasi' || (tx.keluar_mode === 'Penjualan' && !tx.channel)) {
+        // Penjualan ke koperasi (termasuk data lama tanpa channel)
+        monthData.koperasi += qty;
+      } else if (tx.channel === 'dapur' || (tx.keluar_mode === 'Distribusi' && tx.penerima?.toLowerCase().includes('dapur'))) {
+        monthData.dapur += qty;
+      } else if (tx.channel === 'distribusi_bantuan' || (tx.keluar_mode === 'Distribusi' && !tx.penerima?.toLowerCase().includes('dapur'))) {
+        monthData.distribusi_bantuan += qty;
+      }
     } else if (tx.tipe === 'Stocktake') {
       monthData.stocktake += 1;
     }
@@ -349,7 +372,9 @@ export const getInventoryMonthlyData = async (): Promise<InventoryMonthlyData[]>
     .map(data => ({
       month: data.displayMonth,
       masuk: data.masuk,
-      keluar: data.keluar,
+      koperasi: data.koperasi,
+      dapur: data.dapur,
+      distribusi_bantuan: data.distribusi_bantuan,
       stocktake: data.stocktake,
       fromDonation: data.fromDonation,
       fromPurchase: data.fromPurchase
@@ -401,6 +426,79 @@ export const getInventoryCategoryData = async (): Promise<InventoryCategoryData[
 
   return categories.slice(0, 6); // Top 6 categories
 };
+
+/**
+ * Get inventory condition distribution for pie chart
+ * Menggantikan distribusi kategori dengan distribusi kondisi barang
+ * Menghitung jumlah item per kondisi (bukan total quantity)
+ */
+export const getInventoryConditionData = async (): Promise<InventoryConditionData[]> => {
+  const { data: items, error } = await supabase
+    .from('inventaris')
+    .select('kondisi, id');
+
+  if (error) {
+    console.error('Error fetching condition data:', error);
+    return [];
+  }
+
+  // Group by condition - count number of items per condition
+  const conditionMap = new Map<string, { itemCount: number }>();
+
+  items?.forEach(item => {
+    // Normalize kondisi dari data lama ke format baru
+    let kondisi = item.kondisi || 'Baik';
+    if (kondisi === 'Rusak Ringan' || kondisi === 'Perlu Perbaikan' || kondisi === 'Butuh Perbaikan') {
+      kondisi = 'Perlu perbaikan';
+    } else if (kondisi === 'Rusak Berat' || kondisi === 'Rusak') {
+      kondisi = 'Rusak';
+    } else if (kondisi === 'Baik') {
+      kondisi = 'Baik';
+    } else {
+      kondisi = 'Baik'; // Default
+    }
+    
+    if (!conditionMap.has(kondisi)) {
+      conditionMap.set(kondisi, { itemCount: 0 });
+    }
+    
+    const condData = conditionMap.get(kondisi)!;
+    condData.itemCount += 1; // Count items, not quantity
+  });
+
+  // Convert to array - use itemCount as value
+  const conditions = Array.from(conditionMap.entries())
+    .map(([name, data]) => ({
+      name,
+      value: data.itemCount, // Number of items in this condition
+      color: getConditionColor(name),
+      itemCount: data.itemCount // Number of different items
+    }))
+    .filter(cond => cond.value > 0) // Only show conditions with items
+    .sort((a, b) => b.value - a.value);
+
+  return conditions;
+};
+
+/**
+ * Get color for condition
+ */
+function getConditionColor(condition: string): string {
+  // Normalize kondisi untuk mapping warna
+  const normalized = condition === 'Perlu Perbaikan' || condition === 'Butuh Perbaikan' || condition === 'Rusak Ringan' 
+    ? 'Perlu perbaikan'
+    : condition === 'Rusak Berat' || condition === 'Rusak'
+    ? 'Rusak'
+    : 'Baik';
+  
+  const colors: Record<string, string> = {
+    'Baik': '#10b981', // Green
+    'Perlu perbaikan': '#f97316', // Orange
+    'Rusak': '#ef4444', // Red
+  };
+
+  return colors[normalized] || '#6b7280'; // Gray for unknown
+}
 
 /**
  * Get color for category

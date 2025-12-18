@@ -1127,7 +1127,7 @@ const InventarisRefactored = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Baik">Baik</SelectItem>
-                      <SelectItem value="Butuh Perbaikan">Butuh Perbaikan</SelectItem>
+                      <SelectItem value="Perlu perbaikan">Perlu perbaikan</SelectItem>
                       <SelectItem value="Rusak">Rusak</SelectItem>
                     </SelectContent>
                   </Select>

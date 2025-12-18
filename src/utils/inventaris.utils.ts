@@ -69,18 +69,42 @@ export const formatDate = (date: string | null | undefined): string => {
   });
 };
 
+/**
+ * Normalize kondisi dari nilai lama ke nilai baru
+ * Mapping: Baik -> Baik, Rusak Ringan/Perlu Perbaikan/Butuh Perbaikan -> Perlu perbaikan, Rusak Berat/Rusak -> Rusak
+ */
+export const normalizeKondisi = (kondisi: string | null | undefined): 'Baik' | 'Perlu perbaikan' | 'Rusak' => {
+  if (!kondisi) return 'Baik';
+  
+  const normalized = kondisi.trim();
+  
+  // Kondisi baru
+  if (normalized === 'Baik' || normalized === 'Perlu perbaikan' || normalized === 'Rusak') {
+    return normalized as 'Baik' | 'Perlu perbaikan' | 'Rusak';
+  }
+  
+  // Mapping kondisi lama ke kondisi baru
+  if (normalized === 'Rusak Ringan' || normalized === 'Perlu Perbaikan' || normalized === 'Butuh Perbaikan') {
+    return 'Perlu perbaikan';
+  }
+  
+  if (normalized === 'Rusak Berat' || normalized === 'Rusak') {
+    return 'Rusak';
+  }
+  
+  // Default
+  return 'Baik';
+};
+
 // Get kondisi badge color
 export const getKondisiColor = (kondisi: string): string => {
+  const normalized = normalizeKondisi(kondisi);
   const colors: Record<string, string> = {
     "Baik": "bg-green-500/10 text-green-700 border-green-500/20",
-    "Butuh Perbaikan": "bg-orange-500/10 text-orange-700 border-orange-500/20",
+    "Perlu perbaikan": "bg-orange-500/10 text-orange-700 border-orange-500/20",
     "Rusak": "bg-red-500/10 text-red-700 border-red-500/20",
-    // legacy values (tetap diberi warna agar kompatibel terhadap data lama)
-    "Rusak Ringan": "bg-yellow-500/10 text-yellow-700 border-yellow-500/20",
-    "Rusak Berat": "bg-red-500/10 text-red-700 border-red-500/20",
-    "Perlu Perbaikan": "bg-orange-500/10 text-orange-700 border-orange-500/20",
   };
-  return colors[kondisi] || "bg-gray-500/10 text-gray-700 border-gray-500/20";
+  return colors[normalized] || "bg-gray-500/10 text-gray-700 border-gray-500/20";
 };
 
 // Check if stock is low

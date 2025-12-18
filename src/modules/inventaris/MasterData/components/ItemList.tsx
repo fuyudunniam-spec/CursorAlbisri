@@ -99,9 +99,9 @@ const ItemList: React.FC<ItemListProps> = ({
       await updateInventoryItem(item.id, { boleh_dijual_koperasi: next });
 
       toast({
-        title: next ? 'Diizinkan dijual' : 'Dihapus dari kasir',
+        title: next ? 'Pengajuan dibuat' : 'Dihapus dari kasir',
         description: next
-          ? 'Item akan muncul di tab Item Yayasan (Master Produk Koperasi) setelah Anda atur harga.'
+          ? 'Item akan masuk ke pengajuan. Setelah disetujui admin koperasi, item akan muncul di Master Produk Koperasi.'
           : 'Item tidak akan muncul lagi di kasir koperasi.',
       });
 
@@ -122,7 +122,7 @@ const ItemList: React.FC<ItemListProps> = ({
   // Get unique values for filters
   const uniqueKategori = Array.from(new Set(data.map(item => item.kategori).filter(Boolean)));
   const uniqueTipe = Array.from(new Set(data.map(item => item.tipe_item).filter(Boolean)));
-  const uniqueKondisi = ['Baik', 'Rusak Ringan', 'Perlu Perbaikan', 'Rusak Berat'];
+  const uniqueKondisi = ['Baik', 'Perlu perbaikan', 'Rusak'];
 
   // Apply filters
   const filteredData = data.filter(item => {
@@ -169,9 +169,8 @@ const ItemList: React.FC<ItemListProps> = ({
   const getKondisiBadge = (kondisi: string) => {
     const variants = {
       'Baik': 'default',
-      'Rusak Ringan': 'secondary',
-      'Perlu Perbaikan': 'destructive',
-      'Rusak Berat': 'destructive'
+      'Perlu perbaikan': 'secondary',
+      'Rusak': 'destructive'
     } as const;
 
     return (

@@ -145,8 +145,8 @@ export const InventarisForm: React.FC<InventarisFormProps> = ({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Baik">Baik</SelectItem>
-                  <SelectItem value="Rusak Ringan">Rusak Ringan</SelectItem>
-                  <SelectItem value="Rusak Berat">Rusak Berat</SelectItem>
+                  <SelectItem value="Perlu perbaikan">Perlu perbaikan</SelectItem>
+                  <SelectItem value="Rusak">Rusak</SelectItem>
                 </SelectContent>
               </Select>
             </div>

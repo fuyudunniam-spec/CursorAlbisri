@@ -127,12 +127,27 @@ export async function listInventory(
   console.log('Query result:', { data: data?.length, count, error });
   
   if (error) throw error;
-  return { data: (data || []) as InventoryItem[], total: count || 0 };
+  
+  // Normalize kondisi pada semua items
+  const { normalizeKondisi } = await import('@/utils/inventaris.utils');
+  const normalizedData = (data || []).map((item: any) => ({
+    ...item,
+    kondisi: normalizeKondisi(item.kondisi) as any
+  }));
+  
+  return { data: normalizedData as InventoryItem[], total: count || 0 };
 }
 
 export async function getInventoryItem(id: string) {
   const { data, error } = await supabase.from("inventaris").select("*").eq("id", id).single();
   if (error) throw error;
+  
+  // Normalize kondisi pada response
+  const { normalizeKondisi } = await import('@/utils/inventaris.utils');
+  if (data.kondisi) {
+    data.kondisi = normalizeKondisi(data.kondisi) as any;
+  }
+  
   return data as InventoryItem;
 }
 
@@ -184,6 +199,9 @@ async function syncToKopBarang(inventarisItem: any) {
     return;
   }
 
+  // Jangan create baru di sini - hanya update existing
+  // Create baru hanya dilakukan saat approval pengajuan_item_yayasan
+
   // Generate kode produk
   const ownerType = inventarisItem.owner_type || 'yayasan';
   const prefix = ownerType === 'yayasan' ? 'YYS' : 'KOP';
@@ -216,7 +234,7 @@ async function syncToKopBarang(inventarisItem: any) {
   const hppYayasan = inventarisItem.hpp_yayasan || inventarisItem.harga_perolehan || 0;
 
   if (existing) {
-    // Update existing
+    // Update existing (hanya update, tidak create baru)
     await supabase
       .from('kop_barang')
       .update({
@@ -229,37 +247,25 @@ async function syncToKopBarang(inventarisItem: any) {
         // Harga jual tetap, tidak di-overwrite
       })
       .eq('id', existing.id);
-  } else {
-    // Create new
-    // Get default sumber_modal_id (first one)
-    const { data: sumberModal } = await supabase
-      .from('kop_sumber_modal')
-      .select('id')
-      .limit(1)
-      .maybeSingle();
-
-    await supabase
-      .from('kop_barang')
-      .insert({
-        kode_barang: kodeProduk,
-        nama_barang: inventarisItem.nama_barang,
-        satuan_dasar: inventarisItem.satuan || 'pcs',
-        harga_beli: hppYayasan,
-        harga_jual_ecer: hppYayasan * 1.2, // Default markup 20%
-        harga_jual_grosir: hppYayasan * 1.15, // Default markup 15%
-        inventaris_id: inventarisItem.id,
-        harga_transfer: hppYayasan,
-        owner_type: ownerType,
-        sumber_modal_id: sumberModal?.id || null,
-        is_active: true,
-        stok: 0, // Stok tetap di inventaris, kop_barang hanya untuk jual
-      });
   }
+  // Tidak create baru di sini - create baru hanya dilakukan saat approval pengajuan_item_yayasan
 }
 
 export async function createInventoryItem(payload: Partial<InventoryItem>) {
+  // Normalize kondisi sebelum insert
+  if (payload.kondisi) {
+    const { normalizeKondisi } = await import('@/utils/inventaris.utils');
+    payload.kondisi = normalizeKondisi(payload.kondisi) as any;
+  }
+  
   const { data, error } = await supabase.from("inventaris").insert(payload).select("*").single();
   if (error) throw error;
+  
+  // Normalize kondisi pada response
+  const { normalizeKondisi } = await import('@/utils/inventaris.utils');
+  if (data.kondisi) {
+    data.kondisi = normalizeKondisi(data.kondisi) as any;
+  }
   
   // Log flag changes jika ada
   if ('owner_type' in payload) {
@@ -283,10 +289,16 @@ export async function createInventoryItem(payload: Partial<InventoryItem>) {
 }
 
 export async function updateInventoryItem(id: string, payload: Partial<InventoryItem>) {
+  // Normalize kondisi sebelum update
+  if (payload.kondisi) {
+    const { normalizeKondisi } = await import('@/utils/inventaris.utils');
+    payload.kondisi = normalizeKondisi(payload.kondisi) as any;
+  }
+  
   // Get old data untuk cek perubahan boleh_dijual_koperasi
   const { data: oldData } = await supabase
     .from('inventaris')
-    .select('boleh_dijual_koperasi, tipe_item, owner_type')
+    .select('boleh_dijual_koperasi, tipe_item, owner_type, nama_barang, harga_perolehan, jumlah')
     .eq('id', id)
     .single();
 
@@ -301,19 +313,109 @@ export async function updateInventoryItem(id: string, payload: Partial<Inventory
     await logFlagChange(id, 'boleh_dijual_koperasi', oldData?.boleh_dijual_koperasi, payload.boleh_dijual_koperasi);
   }
   
-  // Auto-sync ke kop_barang jika boleh_dijual_koperasi berubah atau owner_type berubah
+  // Jika boleh_dijual_koperasi berubah menjadi true, buat pengajuan_item_yayasan
+  if (
+    'boleh_dijual_koperasi' in payload && 
+    payload.boleh_dijual_koperasi === true && 
+    oldData?.boleh_dijual_koperasi === false &&
+    data.tipe_item === 'Komoditas'
+  ) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Cek apakah sudah ada pengajuan pending untuk item ini
+        const { data: existingPengajuan } = await supabase
+          .from('pengajuan_item_yayasan')
+          .select('id')
+          .eq('inventaris_item_id', id)
+          .eq('status', 'pending_koperasi')
+          .maybeSingle();
+
+        if (!existingPengajuan) {
+          // Validasi qty - constraint memerlukan qty > 0
+          const jumlahStok = Number(data.jumlah) || 0;
+          if (jumlahStok <= 0) {
+            console.warn('Tidak dapat membuat pengajuan: jumlah stok harus > 0. Item:', data.nama_barang);
+            // Tidak throw error, hanya log - user sudah update flag
+            // Lanjutkan ke return data di akhir fungsi
+          } else {
+            // Buat pengajuan baru
+            const nilaiPerolehan = data.harga_perolehan || 0;
+            const usulanHpp = nilaiPerolehan; // Default usulan HPP = nilai perolehan
+            
+            const { error: pengajuanError } = await supabase
+              .from('pengajuan_item_yayasan')
+              .insert({
+                inventaris_item_id: id,
+                nama: data.nama_barang,
+                qty: jumlahStok, // Pastikan qty > 0
+                nilai_perolehan: nilaiPerolehan,
+                usulan_hpp: usulanHpp,
+                status: 'pending_koperasi',
+                created_by: user.id,
+              });
+
+            if (pengajuanError) {
+              console.error('Error creating pengajuan_item_yayasan:', pengajuanError);
+              // Tidak throw error, hanya log - user sudah update flag
+            }
+          }
+        }
+      }
+    } catch (pengajuanError) {
+      console.error('Error creating pengajuan_item_yayasan:', pengajuanError);
+      // Tidak throw error, hanya log
+    }
+  }
+
+  // Jika boleh_dijual_koperasi berubah menjadi false, reject pengajuan yang pending
+  if (
+    'boleh_dijual_koperasi' in payload && 
+    payload.boleh_dijual_koperasi === false && 
+    oldData?.boleh_dijual_koperasi === true
+  ) {
+    try {
+      // Reject pengajuan yang pending untuk item ini
+      await supabase
+        .from('pengajuan_item_yayasan')
+        .update({ status: 'rejected' })
+        .eq('inventaris_item_id', id)
+        .eq('status', 'pending_koperasi');
+    } catch (rejectError) {
+      console.error('Error rejecting pengajuan:', rejectError);
+      // Tidak throw error, hanya log
+    }
+  }
+  
+  // Auto-sync ke kop_barang hanya jika sudah ada (setelah approval)
+  // Jangan langsung create baru, tunggu approval dulu
   const shouldSync = 
-    ('boleh_dijual_koperasi' in payload && payload.boleh_dijual_koperasi !== oldData?.boleh_dijual_koperasi) ||
     ('owner_type' in payload && payload.owner_type !== oldData?.owner_type) ||
     (data.boleh_dijual_koperasi && data.tipe_item === 'Komoditas');
   
   if (shouldSync) {
     try {
-      await syncToKopBarang(data);
+      // Cek apakah sudah ada kop_barang untuk item ini (setelah approval)
+      const { data: existingKopBarang } = await supabase
+        .from('kop_barang')
+        .select('id')
+        .eq('inventaris_id', id)
+        .maybeSingle();
+
+      // Hanya sync jika sudah ada (update existing), jangan create baru
+      if (existingKopBarang) {
+        await syncToKopBarang(data);
+      }
     } catch (syncError) {
       console.error('Error syncing to kop_barang:', syncError);
       // Tidak throw error, hanya log
     }
+  }
+  
+  // Normalize kondisi pada response
+  const { normalizeKondisi } = await import('@/utils/inventaris.utils');
+  if (data.kondisi) {
+    data.kondisi = normalizeKondisi(data.kondisi) as any;
   }
   
   return data as InventoryItem;

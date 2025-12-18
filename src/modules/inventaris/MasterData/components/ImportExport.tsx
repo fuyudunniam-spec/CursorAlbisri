@@ -175,7 +175,7 @@ const ImportExport = ({ onClose, mode, onImportSuccess, inventoryData }: ImportE
           }
 
           // Validasi kondisi
-          const validKondisi = ['Baik', 'Rusak Ringan', 'Rusak Berat', 'Perlu Perbaikan'];
+          const validKondisi = ['Baik', 'Perlu perbaikan', 'Rusak'];
           if (!validKondisi.includes(kondisi)) {
             errors.push(`Baris ${rowNum}: Kondisi harus salah satu dari: ${validKondisi.join(', ')}`);
             failedCount++;

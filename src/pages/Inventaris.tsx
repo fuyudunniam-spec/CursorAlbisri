@@ -171,8 +171,16 @@ const Inventaris = () => {
   // Calculate stats
   const totalItem = inventarisData.length;
   const kondisiBaik = inventarisData.filter(item => item.kondisi === "Baik").length;
-  const perluPerbaikan = inventarisData.filter(item => item.kondisi === "Rusak Ringan" || item.kondisi === "Perlu Perbaikan").length;
-  const rusakBerat = inventarisData.filter(item => item.kondisi === "Rusak Berat").length;
+  const perluPerbaikan = inventarisData.filter(item => 
+    item.kondisi === "Perlu perbaikan" ||
+    // Legacy support
+    item.kondisi === "Rusak Ringan" || item.kondisi === "Perlu Perbaikan" || item.kondisi === "Butuh Perbaikan"
+  ).length;
+  const rusakBerat = inventarisData.filter(item => 
+    item.kondisi === "Rusak" ||
+    // Legacy support
+    item.kondisi === "Rusak Berat"
+  ).length;
   const totalNilaiAset = inventarisData
     .filter(item => item.harga_perolehan)
     .reduce((sum, item) => sum + (item.harga_perolehan! * (item.jumlah || 1)), 0);
@@ -543,9 +551,8 @@ const Inventaris = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Baik">Baik</SelectItem>
-                        <SelectItem value="Rusak Ringan">Rusak Ringan</SelectItem>
-                        <SelectItem value="Perlu Perbaikan">Perlu Perbaikan</SelectItem>
-                        <SelectItem value="Rusak Berat">Rusak Berat</SelectItem>
+                        <SelectItem value="Perlu perbaikan">Perlu perbaikan</SelectItem>
+                        <SelectItem value="Rusak">Rusak</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -736,9 +743,8 @@ const Inventaris = () => {
                     <SelectContent>
                       <SelectItem value="all">Semua Kondisi</SelectItem>
                       <SelectItem value="Baik">Baik</SelectItem>
-                      <SelectItem value="Rusak Ringan">Rusak Ringan</SelectItem>
-                      <SelectItem value="Perlu Perbaikan">Perlu Perbaikan</SelectItem>
-                      <SelectItem value="Rusak Berat">Rusak Berat</SelectItem>
+                      <SelectItem value="Perlu perbaikan">Perlu perbaikan</SelectItem>
+                      <SelectItem value="Rusak">Rusak</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

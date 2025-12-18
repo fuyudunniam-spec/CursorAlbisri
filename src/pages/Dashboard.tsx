@@ -143,7 +143,9 @@ const Dashboard = () => {
       const totalInventaris = inventarisResult.data?.length || 0;
       const inventarisBaik = inventarisResult.data?.filter(item => item.kondisi === 'Baik').length || 0;
       const inventarisRusak = inventarisResult.data?.filter(item => 
-        item.kondisi === 'Rusak Ringan' || item.kondisi === 'Rusak Berat' || item.kondisi === 'Perlu Perbaikan'
+        item.kondisi === 'Rusak' || item.kondisi === 'Perlu perbaikan' ||
+        // Legacy support
+        item.kondisi === 'Rusak Ringan' || item.kondisi === 'Rusak Berat' || item.kondisi === 'Perlu Perbaikan' || item.kondisi === 'Butuh Perbaikan'
       ).length || 0;
       
       // TODO: Add back when perishable/expiry fields are added

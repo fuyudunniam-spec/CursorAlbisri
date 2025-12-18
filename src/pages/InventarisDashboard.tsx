@@ -16,13 +16,14 @@ import InventoryChartsSection from '@/components/dashboard/inventaris/InventoryC
 import { 
   getInventoryDashboardStats, 
   getInventoryMonthlyData, 
-  getInventoryCategoryData,
+  getInventoryConditionData,
   getPendingDonations
 } from '@/services/inventarisDashboard.service';
 import type {
   InventoryStats,
   InventoryMonthlyData,
   InventoryCategoryData,
+  InventoryConditionData,
   PendingDonation
 } from '@/services/inventarisDashboard.service';
 import { getLowStock, getNearExpiry, listTransactions } from '@/services/inventaris.service';
@@ -91,16 +92,16 @@ const InventarisDashboard: React.FC = () => {
       setLoading(true);
       
       // Load data utama secara parallel untuk performa lebih baik
-      const [stats, monthly, category, pending] = await Promise.all([
+      const [stats, monthly, condition, pending] = await Promise.all([
         getInventoryDashboardStats(),
         getInventoryMonthlyData(),
-        getInventoryCategoryData(),
+        getInventoryConditionData(),
         getPendingDonations()
       ]);
       
       setStatistics(stats);
       setMonthlyData(monthly);
-      setCategoryData(category);
+      setCategoryData(condition); // Using condition data instead of category
       setPendingDonations(pending);
       
       // Set loading false setelah data utama selesai (tidak perlu tunggu data sekunder)

@@ -5,7 +5,7 @@ export type InventoryItem = {
   kategori: string;
   zona: string;
   lokasi: string;
-  kondisi: 'Baik' | 'Rusak Ringan' | 'Perlu Perbaikan' | 'Rusak Berat';
+  kondisi: 'Baik' | 'Perlu perbaikan' | 'Rusak';
   jumlah?: number | null;
   satuan?: string | null;
   harga_perolehan?: number | null;

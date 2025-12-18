@@ -458,10 +458,16 @@ const KeuanganV3: React.FC = () => {
         // Clean description (remove "Sumbangan: Rp 0" and hajat from donasi)
         const cleanedDeskripsi = cleanDescription(finalDeskripsi, transaction.kategori);
         
+        // Special handling for Pendidikan Pesantren (tracking nominal, not real expense)
+        let displayCategory = transaction.kategori || 'Lainnya';
+        if (transaction.kategori === 'Pendidikan Pesantren' && transaction.is_pengeluaran_riil === false) {
+          displayCategory = 'Beasiswa Pendidikan Pesantren';
+        }
+        
         return {
           ...transaction,
           akun_kas_nama: (transaction.akun_kas?.nama || transaction.akun_kas_nama || '') || 'Kas Utama',
-          display_category: transaction.kategori || 'Lainnya',
+          display_category: displayCategory,
           source_type: transaction.sub_kategori || transaction.kategori || 'Manual',
           display_description: cleanedDeskripsi || (
             (transaction.jenis_transaksi === 'Pemasukan' ? 'Pemasukan' : 'Pengeluaran') +

@@ -20,8 +20,8 @@ export const inventarisSchema = z.object({
   lokasi: z.string()
     .min(1, "Lokasi wajib diisi"),
   
-  // Kondisi akan dinamis di UI; skema tetap membolehkan nilai valid
-  kondisi: z.enum(["Baik", "Butuh Perbaikan", "Rusak", "Rusak Ringan", "Perlu Perbaikan", "Rusak Berat"], {
+  // Kondisi: Baik, Perlu perbaikan, Rusak
+  kondisi: z.enum(["Baik", "Perlu perbaikan", "Rusak"], {
     errorMap: () => ({ message: "Pilih kondisi yang valid" })
   }),
   

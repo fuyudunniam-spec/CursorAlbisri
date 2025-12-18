@@ -24,11 +24,9 @@ type Props = {
 const KONDISI_OPTIONS = [
   { value: "all", label: "Semua Kondisi" },
   { value: "Baik", label: "Baik" },
-  { value: "Butuh Perbaikan", label: "Butuh Perbaikan" },
+  { value: "Baik", label: "Baik" },
+  { value: "Perlu perbaikan", label: "Perlu perbaikan" },
   { value: "Rusak", label: "Rusak" },
-  { value: "Rusak Ringan", label: "Rusak Ringan" },
-  { value: "Rusak Berat", label: "Rusak Berat" },
-  { value: "Perlu Perbaikan", label: "Perlu Perbaikan" },
 ];
 
 const TIPE_OPTIONS = [

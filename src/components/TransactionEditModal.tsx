@@ -7,10 +7,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { X, Save, Plus, Trash2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { X, Save, Plus, Trash2, Users, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../integrations/supabase/client';
 import { AkunKasService, AkunKas } from '../services/akunKas.service';
+import { AlokasiPengeluaranService, AlokasiPengeluaranSantri } from '../services/alokasiPengeluaran.service';
 
 // Helper functions to replace KeuanganService
 const updateTransaction = async (id: string, data: any) => {
@@ -36,13 +39,11 @@ const updateTransaction = async (id: string, data: any) => {
     if (targetAkunId) {
       const { error: saldoError } = await supabase.rpc('ensure_akun_kas_saldo_correct_for', { p_akun_id: targetAkunId });
       if (saldoError) {
-        console.warn('[DEBUG] Warning ensuring saldo correct after update (per-account):', saldoError);
-      } else {
-        console.log('[DEBUG] Saldo akun kas ensured correct after update (per-account)');
+        // Failed to ensure saldo correct, but transaction update already succeeded
       }
     }
   } catch (saldoErr) {
-    console.warn('[DEBUG] Error ensuring saldo correct after update (per-account):', saldoErr);
+    // Error ensuring saldo correct, but transaction update already succeeded
   }
 };
 
@@ -116,13 +117,47 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
   
   // Options
   const [akunKasOptions, setAkunKasOptions] = useState<AkunKas[]>([]);
+  
+  // Alokasi santri (untuk transaksi dengan alokasi khusus)
+  const [alokasiSantri, setAlokasiSantri] = useState<Array<AlokasiPengeluaranSantri & { santri?: { nama_lengkap?: string; id_santri?: string; nisn?: string } }>>([]);
+  const [loadingAlokasi, setLoadingAlokasi] = useState(false);
+  const [editingAlokasi, setEditingAlokasi] = useState<{ [key: string]: any }>({});
 
   // Load initial data
   useEffect(() => {
     if (transaction && isOpen) {
       loadInitialData();
+    } else if (!isOpen) {
+      // Reset state when dialog is closed
+      setAlokasiSantri([]);
+      setLoadingAlokasi(false);
+      setEditingAlokasi({});
     }
   }, [transaction, isOpen]);
+
+  // Reset sub_kategori when kategori changes
+  useEffect(() => {
+    if (!formData.kategori) return;
+    
+    if (formData.kategori === 'Operasional dan Konsumsi Santri') {
+      // Jika sub_kategori tidak valid, reset ke kosong
+      if (formData.sub_kategori && formData.sub_kategori !== 'Konsumsi' && formData.sub_kategori !== 'Operasional') {
+        setFormData(prev => ({ ...prev, sub_kategori: '' }));
+      }
+    } else if (formData.kategori === 'Operasional Yayasan') {
+      // Jika sub_kategori tidak valid, reset ke kosong
+      const validSubKategori = ['Gaji & Honor', 'Utilitas', 'Maintenance', 'Administrasi', 'Lain-lain'];
+      if (formData.sub_kategori && !validSubKategori.includes(formData.sub_kategori)) {
+        setFormData(prev => ({ ...prev, sub_kategori: '' }));
+      }
+    } else {
+      // Untuk kategori lain, reset sub_kategori jika sebelumnya adalah dropdown value
+      const dropdownValues = ['Konsumsi', 'Operasional', 'Gaji & Honor', 'Utilitas', 'Maintenance', 'Administrasi', 'Lain-lain'];
+      if (dropdownValues.includes(formData.sub_kategori)) {
+        setFormData(prev => ({ ...prev, sub_kategori: '' }));
+      }
+    }
+  }, [formData.kategori]);
 
   const loadInitialData = async () => {
     try {
@@ -139,8 +174,10 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
       // Filter akun yang dikelola modul Tabungan
       const filtered = (accounts || []).filter((a: any) => a?.managed_by !== 'tabungan');
       setAkunKasOptions(filtered as any);
+      
 
       // Set form data from transaction
+      const jenisAlokasi = transaction.jenis_alokasi || 'none';
       setFormData({
         tanggal: transaction.tanggal || '',
         kategori: transaction.kategori || '',
@@ -149,8 +186,17 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
         penerima_pembayar: transaction.penerima_pembayar || '',
         deskripsi: transaction.deskripsi || '',
         jumlah: transaction.jumlah || 0,
-        jenis_alokasi: transaction.jenis_alokasi || 'none'
+        jenis_alokasi: jenisAlokasi
       });
+      
+      // Load alokasi santri jika jenis alokasi adalah 'langsung'
+      // Jangan load alokasi untuk kategori "Operasional Yayasan" karena tidak dialokasikan ke santri
+      if (!isPemasukan && jenisAlokasi === 'langsung' && transaction.kategori !== 'Operasional Yayasan') {
+        await loadAlokasiSantri(transaction.id);
+      } else if (transaction.kategori === 'Operasional Yayasan') {
+        // Pastikan tidak ada alokasi untuk Operasional Yayasan
+        setAlokasiSantri([]);
+      }
 
       // Set rincian items - only for Pengeluaran
       if (!isPemasukan) {
@@ -184,7 +230,6 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
         setRincianItems([]);
       }
     } catch (error) {
-      console.error('Error loading initial data:', error);
       toast.error('Gagal memuat data transaksi');
     } finally {
       setLoading(false);
@@ -244,6 +289,20 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
         return;
       }
 
+      // Jika kategori diubah menjadi "Operasional Yayasan", hapus semua alokasi yang ada
+      // karena kategori ini tidak dialokasikan ke santri
+      if (formData.kategori === 'Operasional Yayasan') {
+        // Hapus semua alokasi untuk transaksi ini
+        const { error: deleteAlokasiError } = await supabase
+          .from('alokasi_pengeluaran_santri')
+          .delete()
+          .eq('keuangan_id', transaction.id);
+        
+        if (deleteAlokasiError) {
+          // Failed to delete alokasi, but main update already succeeded
+        }
+      }
+
       // Update transaction
       await updateTransaction(transaction.id, {
         tanggal: formData.tanggal,
@@ -253,7 +312,7 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
         penerima_pembayar: formData.penerima_pembayar,
         deskripsi: formData.deskripsi,
         jumlah: formData.jumlah,
-        jenis_alokasi: formData.jenis_alokasi === 'none' ? null : formData.jenis_alokasi
+        jenis_alokasi: formData.kategori === 'Operasional Yayasan' ? null : (formData.jenis_alokasi === 'none' ? null : formData.jenis_alokasi)
       });
 
       // Update rincian items (only for Pengeluaran)
@@ -314,8 +373,86 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
       onSuccess?.();
       onClose();
     } catch (error) {
-      console.error('Error updating transaction:', error);
       toast.error('Gagal memperbarui transaksi');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const loadAlokasiSantri = async (keuanganId: string) => {
+    try {
+      setLoadingAlokasi(true);
+      const allocations = await AlokasiPengeluaranService.getByKeuanganId(keuanganId);
+      
+      // Load santri data for each allocation
+      const allocationsWithSantri = await Promise.all(
+        allocations.map(async (alloc) => {
+          try {
+            const { data: santriData } = await supabase
+              .from('santri')
+              .select('nama_lengkap, id_santri, nisn')
+              .eq('id', alloc.santri_id)
+              .single();
+            
+            return {
+              ...alloc,
+              santri: santriData || undefined
+            };
+          } catch (error) {
+            return alloc;
+          }
+        })
+      );
+      
+      setAlokasiSantri(allocationsWithSantri);
+      // Initialize editing state
+      const editState: { [key: string]: any } = {};
+      allocationsWithSantri.forEach(alloc => {
+        if (alloc.id) {
+          editState[alloc.id] = {
+            nominal_alokasi: alloc.nominal_alokasi,
+            jenis_bantuan: alloc.jenis_bantuan,
+            periode: alloc.periode,
+            keterangan: alloc.keterangan || ''
+          };
+        }
+      });
+      setEditingAlokasi(editState);
+    } catch (error) {
+      // Error loading alokasi santri - handled silently
+      toast.error('Gagal memuat data alokasi santri');
+    } finally {
+      setLoadingAlokasi(false);
+    }
+  };
+
+  const handleAlokasiChange = (alokasiId: string, field: string, value: any) => {
+    setEditingAlokasi(prev => ({
+      ...prev,
+      [alokasiId]: {
+        ...prev[alokasiId],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleSaveAlokasi = async () => {
+    try {
+      setSaving(true);
+      
+      // Update each alokasi
+      for (const [alokasiId, changes] of Object.entries(editingAlokasi)) {
+        if (changes && Object.keys(changes).length > 0) {
+          await AlokasiPengeluaranService.update(alokasiId, changes);
+        }
+      }
+      
+      // Reload alokasi to reflect changes
+      await loadAlokasiSantri(transaction.id);
+      
+      toast.success('Alokasi santri berhasil diperbarui');
+    } catch (error) {
+      toast.error('Gagal memperbarui alokasi santri');
     } finally {
       setSaving(false);
     }
@@ -343,12 +480,11 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
   ];
   
   const kategoriPengeluaran = [
-    'Kebutuhan Santri Bantuan',
-    'Gaji Karyawan',
-    'Utilitas',
-    'Operasional',
-    'Maintenance',
-    'Lainnya'
+    'Pendidikan Pesantren',
+    'Pendidikan Formal',
+    'Operasional dan Konsumsi Santri',
+    'Bantuan Langsung Yayasan',
+    'Operasional Yayasan'
   ];
 
   return (
@@ -411,12 +547,37 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
                   
                   <div>
                     <Label htmlFor="sub_kategori">Sub Kategori</Label>
-                    <Input
-                      id="sub_kategori"
-                      value={formData.sub_kategori}
-                      onChange={(e) => handleInputChange('sub_kategori', e.target.value)}
-                      placeholder="Contoh: Listrik"
-                    />
+                    {!isPemasukan && formData.kategori === 'Operasional dan Konsumsi Santri' ? (
+                      <Select value={formData.sub_kategori} onValueChange={(value) => handleInputChange('sub_kategori', value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih sub kategori" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Konsumsi">Konsumsi</SelectItem>
+                          <SelectItem value="Operasional">Operasional</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : !isPemasukan && formData.kategori === 'Operasional Yayasan' ? (
+                      <Select value={formData.sub_kategori} onValueChange={(value) => handleInputChange('sub_kategori', value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih sub kategori" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Gaji & Honor">Gaji & Honor</SelectItem>
+                          <SelectItem value="Utilitas">Utilitas</SelectItem>
+                          <SelectItem value="Maintenance">Maintenance</SelectItem>
+                          <SelectItem value="Administrasi">Administrasi</SelectItem>
+                          <SelectItem value="Lain-lain">Lain-lain</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        id="sub_kategori"
+                        value={formData.sub_kategori}
+                        onChange={(e) => handleInputChange('sub_kategori', e.target.value)}
+                        placeholder={isPemasukan ? "Contoh: Bunga Bank" : "e.g., SPP Formal, Konsumsi, Buku"}
+                      />
+                    )}
                   </div>
                   
                   <div>
@@ -438,7 +599,18 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
                   {!isPemasukan && (
                     <div>
                       <Label htmlFor="jenis_alokasi">Alokasi ke Santri</Label>
-                      <Select value={formData.jenis_alokasi} onValueChange={(value) => handleInputChange('jenis_alokasi', value)}>
+                      <Select 
+                        value={formData.jenis_alokasi || 'none'} 
+                        onValueChange={async (value) => {
+                          handleInputChange('jenis_alokasi', value);
+                          // Load alokasi santri jika jenis alokasi adalah 'langsung'
+                          if (value === 'langsung') {
+                            await loadAlokasiSantri(transaction.id);
+                          } else {
+                            setAlokasiSantri([]);
+                          }
+                        }}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Pilih jenis alokasi" />
                         </SelectTrigger>
@@ -586,6 +758,193 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
                       </div>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Distribusi Bantuan ke Santri - Only show for Pengeluaran with alokasi langsung */}
+            {!isPemasukan && (formData.jenis_alokasi === 'langsung' || transaction.jenis_alokasi === 'langsung') && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Distribusi Bantuan ke Santri
+                    </CardTitle>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => loadAlokasiSantri(transaction.id)}
+                        disabled={loadingAlokasi || saving}
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        {loadingAlokasi ? 'Memuat...' : 'Refresh'}
+                      </Button>
+                      {alokasiSantri.length > 0 && Object.keys(editingAlokasi).length > 0 && (
+                        <Button 
+                          variant="default" 
+                          size="sm"
+                          onClick={handleSaveAlokasi}
+                          disabled={saving || loadingAlokasi}
+                        >
+                          <Save className="h-4 w-4 mr-2" />
+                          {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {loadingAlokasi ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                        <p className="text-muted-foreground">Memuat data distribusi...</p>
+                      </div>
+                    </div>
+                  ) : alokasiSantri.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>Belum ada distribusi bantuan ke santri</p>
+                      <p className="text-xs mt-2">Distribusi bantuan akan ditampilkan di sini setelah dialokasikan</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-blue-900">
+                            Total Santri: {alokasiSantri.length}
+                          </span>
+                          <span className="text-sm font-semibold text-blue-700">
+                            Total Alokasi: {formatCurrency(
+                              alokasiSantri.reduce((sum, alloc) => {
+                                const editData = editingAlokasi[alloc.id || ''];
+                                const nominal = editData?.nominal_alokasi !== undefined 
+                                  ? editData.nominal_alokasi 
+                                  : alloc.nominal_alokasi || 0;
+                                return sum + nominal;
+                              }, 0)
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>No</TableHead>
+                              <TableHead>Nama Santri</TableHead>
+                              <TableHead>ID Santri</TableHead>
+                              <TableHead>Jenis Bantuan</TableHead>
+                              <TableHead>Periode</TableHead>
+                              <TableHead className="text-right">Nominal Alokasi</TableHead>
+                              <TableHead className="text-right">Persentase</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {alokasiSantri.map((alloc, index) => {
+                              const editData = editingAlokasi[alloc.id || ''] || {};
+                              const nominal = editData.nominal_alokasi !== undefined 
+                                ? editData.nominal_alokasi 
+                                : alloc.nominal_alokasi || 0;
+                              const jenisBantuan = editData.jenis_bantuan !== undefined 
+                                ? editData.jenis_bantuan 
+                                : alloc.jenis_bantuan || '';
+                              const periode = editData.periode !== undefined 
+                                ? editData.periode 
+                                : alloc.periode || '';
+                              const keterangan = editData.keterangan !== undefined 
+                                ? editData.keterangan 
+                                : alloc.keterangan || '';
+                              
+                              return (
+                                <TableRow key={alloc.id || index}>
+                                  <TableCell className="font-medium">{index + 1}</TableCell>
+                                  <TableCell>
+                                    <div>
+                                      <p className="font-medium">
+                                        {alloc.santri?.nama_lengkap || 'Santri tidak ditemukan'}
+                                      </p>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className="font-mono text-xs">
+                                      {alloc.santri?.id_santri || alloc.santri?.nisn || '-'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Input
+                                      value={jenisBantuan}
+                                      onChange={(e) => handleAlokasiChange(alloc.id || '', 'jenis_bantuan', e.target.value)}
+                                      className="h-8 text-xs"
+                                      placeholder="Jenis bantuan"
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Input
+                                      value={periode}
+                                      onChange={(e) => handleAlokasiChange(alloc.id || '', 'periode', e.target.value)}
+                                      className="h-8 text-xs"
+                                      placeholder="Periode"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Input
+                                      type="number"
+                                      value={nominal}
+                                      onChange={(e) => handleAlokasiChange(alloc.id || '', 'nominal_alokasi', parseFloat(e.target.value) || 0)}
+                                      className="h-8 text-right font-semibold text-blue-600"
+                                      min="0"
+                                      step="1000"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {formatCurrency(nominal)}
+                                    </p>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <span className="text-sm">
+                                      {alloc.persentase_alokasi ? `${alloc.persentase_alokasi.toFixed(2)}%` : '-'}
+                                    </span>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      
+                      {/* Keterangan untuk setiap alokasi */}
+                      {alokasiSantri.length > 0 && (
+                        <div className="space-y-2 mt-4">
+                          <Label className="text-sm font-medium">Keterangan Alokasi</Label>
+                          {alokasiSantri.map((alloc, index) => {
+                            const editData = editingAlokasi[alloc.id || ''] || {};
+                            const keterangan = editData.keterangan !== undefined 
+                              ? editData.keterangan 
+                              : alloc.keterangan || '';
+                            
+                            return (
+                              <div key={alloc.id || index} className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-muted-foreground w-32 truncate">
+                                    {alloc.santri?.nama_lengkap || `Santri ${index + 1}`}:
+                                  </span>
+                                  <Input
+                                    value={keterangan}
+                                    onChange={(e) => handleAlokasiChange(alloc.id || '', 'keterangan', e.target.value)}
+                                    className="h-8 text-xs"
+                                    placeholder="Keterangan (opsional)"
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
