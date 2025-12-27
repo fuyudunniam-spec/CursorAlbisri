@@ -29,7 +29,20 @@ export class SantriOnboardingService {
   /**
    * Check if santri profile is complete
    */
-  static async checkProfileCompletion(santriId: string): Promise<ProfileCompletionStatus> {
+  static async checkProfileCompletion(santriId: string | null | undefined): Promise<ProfileCompletionStatus> {
+    // Return early if santriId is not provided
+    if (!santriId) {
+      return {
+        isComplete: false,
+        completionPercentage: 0,
+        missingFields: [],
+        missingDocuments: [],
+        missingWali: true,
+        nextSteps: ['ID Santri tidak ditemukan. Silakan hubungi administrator.'],
+        canSkipOnboarding: false,
+      };
+    }
+    
     try {
       // Get santri data
       const { data: santri, error: santriError } = await supabase

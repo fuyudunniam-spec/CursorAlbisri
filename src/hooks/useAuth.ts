@@ -230,6 +230,7 @@ export function useAuth() {
             
             // Add timeout for role fetching to prevent hanging
             // Check localStorage cache first for faster loading
+            // NOTE: For santri users, we skip cache because we need santriId which is not cached
             const cacheKey = `user_roles_${session.user.id}`;
             const cachedRoles = localStorage.getItem(cacheKey);
             let cachedRoleData: any = null;
@@ -238,61 +239,67 @@ export function useAuth() {
               try {
                 const roles = JSON.parse(cachedRoles);
                 const cacheTime = localStorage.getItem(`${cacheKey}_time`);
-                if (cacheTime && Date.now() - parseInt(cacheTime) < 5 * 60 * 1000 && roles.length > 0) {
+                const cachedRole = roles[0] || 'santri';
+                
+                // Don't use cache for santri users - we need to fetch santriId
+                // This prevents Dashboard redirect loop when santriId is missing
+                if (cacheTime && Date.now() - parseInt(cacheTime) < 5 * 60 * 1000 && roles.length > 0 && cachedRole !== 'santri') {
                   cachedRoleData = {
                     id: session.user.id,
                     email: session.user.email || '',
-                    role: roles[0] || 'santri',
+                    role: cachedRole,
                     roles: roles,
                     name: session.user.email?.split('@')[0] || 'User'
                   };
                   logger.log("⚡ [useAuth] Using cached role data:", cachedRoleData.role);
+                } else if (cachedRole === 'santri') {
+                  logger.log("⚡ [useAuth] Skipping cache for santri - need to fetch santriId");
                 }
               } catch (e) {
                 // Invalid cache, continue to fetch
               }
             }
             
-            // If we have cached data, set it immediately but still fetch in background
+            // If we have cached data (and it's not santri), set it immediately but still fetch in background
             if (cachedRoleData) {
               setUser(cachedRoleData);
               setLoadingFalse();
-            }
-            
-            let roleFetchTimedOut = false;
-            const timeoutId = setTimeout(() => {
-              if (!cachedRoleData) {
-                roleFetchTimedOut = true;
-                logger.warn("⏰ [useAuth] Role fetch timeout - using default role");
-                // Set default user if timeout
-                setUser({
-                  id: session.user.id,
-                  email: session.user.email || '',
-                  role: 'santri',
-                  roles: [],
-                  name: session.user.email?.split('@')[0] || 'User'
-                });
-                setLoadingFalse();
-              }
-            }, 2000); // 2 second timeout (reduced from 3)
-
-            // Fetch role (non-blocking if we have cache)
-            if (cachedRoleData) {
-              // We already have cached data, fetch in background to refresh
+              
+              // Fetch in background to refresh (don't wait for it)
               fetchUserRole(session.user.id, session.user)
                 .then(() => {
-                  clearTimeout(timeoutId);
                   logger.log("🔐 [useAuth] Role refreshed in background");
                 })
                 .catch((roleError) => {
-                  clearTimeout(timeoutId);
                   logger.warn("⚠️ [useAuth] Background role refresh failed:", roleError);
                 });
             } else {
-              // No cache, fetch role (may timeout, that's OK)
+              // No cache, fetch role (must complete to get santriId for santri users)
+              // Set loading to false only after fetch completes
+              let roleFetchTimedOut = false;
+              let fetchCompleted = false; // Track if fetchUserRole has completed
+              
+              const timeoutId = setTimeout(() => {
+                if (!fetchCompleted) {
+                  roleFetchTimedOut = true;
+                  logger.warn("⏰ [useAuth] Role fetch timeout - using default role");
+                  // Set default user if timeout (loading will be set false by fetchUserRole's then/catch)
+                  setUser({
+                    id: session.user.id,
+                    email: session.user.email || '',
+                    role: 'santri',
+                    roles: [],
+                    name: session.user.email?.split('@')[0] || 'User'
+                  });
+                  // Note: loading will be set false by fetchUserRole's then/catch when it completes
+                }
+              }, 2000); // 2 second timeout (reduced from 3)
+              
               fetchUserRole(session.user.id, session.user)
                 .then(() => {
+                  fetchCompleted = true;
                   clearTimeout(timeoutId);
+                  setLoadingFalse(); // Set loading false after fetch completes
                   if (roleFetchTimedOut) {
                     logger.log("🔐 [useAuth] Role fetched after timeout - updating user");
                   } else {
@@ -300,7 +307,9 @@ export function useAuth() {
                   }
                 })
                 .catch((roleError) => {
+                  fetchCompleted = true;
                   clearTimeout(timeoutId);
+                  setLoadingFalse(); // Set loading false even on error
                   if (!roleFetchTimedOut) {
                     logger.error("❌ [useAuth] Error fetching role:", roleError);
                   }

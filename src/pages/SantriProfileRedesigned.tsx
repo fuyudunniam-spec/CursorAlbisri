@@ -45,7 +45,8 @@ import {
   Camera,
   UserCircle,
   FolderOpen,
-  Lock
+  Lock,
+  LogOut
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDate, formatRupiah } from "@/utils/inventaris.utils";
@@ -151,7 +152,7 @@ interface PaymentHistory {
 const SantriProfileRedesigned = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   
   const santriId = searchParams.get("santriId") || undefined;
   const santriName = searchParams.get("santriName") || undefined;
@@ -235,9 +236,19 @@ const SantriProfileRedesigned = () => {
 
   // Load all data
   useEffect(() => {
-    if (!santriId) return;
+    if (!santriId) {
+      setLoading(false);
+      return;
+    }
     
     const loadData = async () => {
+      // Double check santriId is valid
+      if (!santriId) {
+        console.warn('⚠️ [SantriProfileRedesigned] No santriId provided in loadData');
+        setLoading(false);
+        return;
+      }
+      
       setLoading(true);
       try {
         // Load santri data
@@ -1356,9 +1367,13 @@ const SantriProfileRedesigned = () => {
 
   // Redirect santri if trying to access other santri's profile
   useEffect(() => {
-    if (isCurrentUserSantri && santriId && user?.santriId !== santriId) {
+    if (isCurrentUserSantri && santriId && user?.santriId && user.santriId !== santriId) {
       console.warn('⚠️ [SantriProfile] Santri trying to access other profile, redirecting to own profile');
       navigate(`/santri/profile?santriId=${user.santriId}&santriName=${encodeURIComponent(user.name || 'Santri')}`, { replace: true });
+    } else if (isCurrentUserSantri && !user?.santriId) {
+      // If user is santri but doesn't have santriId linked, redirect to auth
+      console.warn('⚠️ [SantriProfile] Santri account not linked to santri data, redirecting to auth');
+      navigate('/auth', { replace: true });
     }
   }, [isCurrentUserSantri, santriId, user?.santriId, user?.name, navigate]);
 
@@ -1465,6 +1480,31 @@ const SantriProfileRedesigned = () => {
                   </Button>
                 </>
               )}
+              {/* Logout button - only show for santri viewing own profile */}
+              {isViewingOwnProfile && (
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  onClick={async () => {
+                    try {
+                      await logout();
+                      // Use window.location.replace to force full page reload and clear all state
+                      // replace() prevents back button from going back to logged-in state
+                      setTimeout(() => {
+                        window.location.replace('/auth');
+                      }, 100); // Small delay to ensure logout completes
+                    } catch (error) {
+                      console.error('Error during logout:', error);
+                      // Still redirect even if logout fails
+                      window.location.replace('/auth');
+                    }
+                  }}
+                  className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                  title="Logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                </Button>
+              )}
               <Button 
                 variant="default" 
                 size="icon" 
@@ -1536,6 +1576,26 @@ const SantriProfileRedesigned = () => {
       {/* Main Content */}
       <div className="container mx-auto px-4 pb-20 md:pb-8 max-w-full overflow-x-hidden">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          {/* Desktop Tabs Navigation - Hidden on mobile (mobile uses bottom nav) */}
+          <TabsList className="hidden md:grid md:grid-cols-5 w-full mb-6 bg-white border border-primary/10 rounded-lg p-1 h-auto">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <TabsTrigger
+                  key={item.id}
+                  value={item.id}
+                  className={cn(
+                    "flex items-center justify-center gap-2 text-sm py-2.5 transition-all",
+                    isActive && "bg-primary text-white"
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
 
           {/* Tab Content */}
           <TabsContent value="ringkasan" className="space-y-6 mt-6">
@@ -2711,6 +2771,41 @@ const SantriProfileRedesigned = () => {
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </Button>
+
+              {/* Logout - only show for santri viewing own profile */}
+              {isViewingOwnProfile && (
+                <>
+                  <div className="border-t border-primary/10 my-2"></div>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start h-auto py-4 px-4 hover:bg-red-50 text-red-600 hover:text-red-700"
+                    onClick={async () => {
+                      setShowSettingsPanel(false);
+                      try {
+                        await logout();
+                        // Use window.location.replace to force full page reload and clear all state
+                        // replace() prevents back button from going back to logged-in state
+                        setTimeout(() => {
+                          window.location.replace('/auth');
+                        }, 100); // Small delay to ensure logout completes
+                      } catch (error) {
+                        console.error('Error during logout:', error);
+                        // Still redirect even if logout fails
+                        window.location.replace('/auth');
+                      }
+                    }}
+                  >
+                    <div className="p-2 bg-red-100 rounded-lg mr-3">
+                      <LogOut className="w-5 h-5 text-red-600" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <div className="font-semibold">Logout</div>
+                      <div className="text-xs text-muted-foreground">Keluar dari akun</div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  </Button>
+                </>
+              )}
             </div>
 
             {/* Quick Navigation */}

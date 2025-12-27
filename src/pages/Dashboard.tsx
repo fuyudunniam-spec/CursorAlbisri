@@ -91,7 +91,7 @@ const formatRupiah = (amount: number): string => {
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     totalSantri: 0,
     totalDonasi: 0,
@@ -115,18 +115,31 @@ const Dashboard = () => {
 
   // Redirect santri to their profile page
   // If santri has no santriId, redirect to auth (account not properly linked)
+  // Wait for auth loading to complete before checking santriId to avoid race condition
   useEffect(() => {
+    // Don't redirect while auth is still loading
+    if (authLoading) {
+      return;
+    }
+
     if (user && user.role === 'santri') {
       if (user.santriId) {
         navigate(`/santri/profile?santriId=${user.santriId}&santriName=${encodeURIComponent(user.name || 'Santri')}`, { replace: true });
       } else {
         // Santri account exists but not linked to santri data - redirect to auth
-        console.warn('⚠️ Santri account not linked to santri data, redirecting to auth');
-        navigate('/auth', { replace: true });
+        // Add a small delay to allow santriId to be set if it's still being fetched
+        const timeoutId = setTimeout(() => {
+          if (!user.santriId) {
+            console.warn('⚠️ Santri account not linked to santri data, redirecting to auth');
+            navigate('/auth', { replace: true });
+          }
+        }, 500); // Wait 500ms for santriId to be set
+
+        return () => clearTimeout(timeoutId);
       }
       return;
     }
-  }, [user, navigate]);
+  }, [user, navigate, authLoading]);
 
   // Redirect pengajar to their dashboard
   useEffect(() => {

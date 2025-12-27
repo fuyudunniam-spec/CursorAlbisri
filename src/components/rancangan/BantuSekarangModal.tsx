@@ -167,3 +167,4 @@ const BantuSekarangModal: React.FC<BantuSekarangModalProps> = ({
 
 export default BantuSekarangModal;
 
+
