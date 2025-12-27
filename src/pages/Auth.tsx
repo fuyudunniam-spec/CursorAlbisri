@@ -76,10 +76,27 @@ export default function Auth() {
 
       if (error) {
         console.error('❌ [Auth] Login error:', error);
-        if (isIdSantri && error.message.includes('Invalid login')) {
-          setError('ID Santri atau password salah. Pastikan akun Anda sudah dibuat oleh admin.');
+        
+        // Handle santri login errors with better messaging
+        if (isIdSantri) {
+          // Check for common login credential errors
+          const errorMsg = error.message?.toLowerCase() || '';
+          const errorStatus = (error as any).status || (error as any).code;
+          const isCredentialError = 
+            errorMsg.includes('invalid login') ||
+            errorMsg.includes('invalid credentials') ||
+            errorMsg.includes('email not confirmed') ||
+            errorStatus === 400 ||
+            errorStatus === 401;
+          
+          if (isCredentialError) {
+            setError('Akun tidak ditemukan atau password salah. Jika akun Anda belum dibuat, silakan hubungi admin untuk membuatkan akun.');
+          } else {
+            setError(error.message || 'Terjadi kesalahan saat login. Silakan hubungi admin jika masalah berlanjut.');
+          }
         } else {
-          setError(error.message || 'Email/ID Santri atau password salah');
+          // Regular email login errors
+          setError(error.message || 'Email atau password salah');
         }
       } else {
         console.log('✅ [Auth] Login successful!', { userId: data.user?.id, email: data.user?.email });

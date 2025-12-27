@@ -5,7 +5,7 @@ import { TrendingUp, TrendingDown, Heart, Activity, Bell, Share2, Search, Dollar
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Line, CartesianGrid, Area, AreaChart } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Line, CartesianGrid, Area, AreaChart, XAxis, YAxis } from "recharts";
 
 interface DashboardStats {
   totalSantri: number;
@@ -24,30 +24,63 @@ interface DashboardStats {
   expiredItems: number;
 }
 
-interface Activity {
+interface RecentActivity {
   type: 'transaksi' | 'donasi';
   message: string;
   time: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: typeof Activity;
+  amount?: number;
 }
 
 interface TrendData {
+  percentage: number;
+  isPositive: boolean;
+  difference: number;
+}
+
+interface ChartDataPoint {
   month: string;
   donasi: number;
   pemasukan: number;
+  pengeluaran?: number;
   total: number;
 }
 
-interface TooltipProps {
-  active?: boolean;
-  payload?: Array<{
-    name: string;
-    value: number;
-    color: string;
-  }>;
+interface BreakdownDataItem {
+  name: string;
+  percentage: string;
+  value: number;
+  color: string;
 }
 
-const formatRupiah = (amount: number) => {
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; color: string }>;
+}
+
+// Constants
+const INVENTARIS_VALUE_MULTIPLIER = 10000;
+const TREND_COMPARISON_MULTIPLIERS = {
+  pemasukan: 0.95,
+  pengeluaran: 1.02,
+  saldo: 0.98,
+  donasi: 0.96,
+} as const;
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'] as const;
+
+const CHART_COLORS = {
+  emerald: {
+    light: '#10B981',
+    medium: '#059669',
+    dark: '#047857',
+  },
+  red: '#EF4444',
+  blue: '#3B82F6',
+} as const;
+
+// Utility functions
+const formatRupiah = (amount: number): string => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
@@ -55,20 +88,6 @@ const formatRupiah = (amount: number) => {
     maximumFractionDigits: 0
   }).format(amount);
 };
-
-// Constants for hardcoded percentages and values
-const FINANCE_SCORE_PERCENTAGE = 92;
-const KAS_UTAMA_PERCENTAGE = 0.3;
-const KAS_OPERASIONAL_PERCENTAGE = 0.4;
-const EMERGENCY_FUND_PERCENTAGE = 0.45;
-const EMERGENCY_FUND_TARGET_MULTIPLIER = 2;
-const EMERGENCY_FUND_PROGRESS_PERCENTAGE = 45;
-const OPERATIONAL_FUND_PERCENTAGE = 0.25;
-const OPERATIONAL_FUND_TARGET_MULTIPLIER = 4;
-const OPERATIONAL_FUND_PROGRESS_PERCENTAGE = 25;
-const DEVELOPMENT_FUND_PERCENTAGE = 0.5;
-const DEVELOPMENT_FUND_TARGET_MULTIPLIER = 1;
-const DEVELOPMENT_FUND_PROGRESS_PERCENTAGE = 50;
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -90,9 +109,9 @@ const Dashboard = () => {
     expiredItems: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
+  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
   const [deletedActivities, setDeletedActivities] = useState<Set<number>>(new Set());
-  const [monthlyTrendData, setMonthlyTrendData] = useState<TrendData[]>([]);
+  const [monthlyTrendData, setMonthlyTrendData] = useState<ChartDataPoint[]>([]);
 
   // Redirect santri to their profile page
   useEffect(() => {
@@ -113,7 +132,6 @@ const Dashboard = () => {
   useEffect(() => {
     fetchDashboardData();
   }, []);
-
 
   const fetchDashboardData = async () => {
     try {
@@ -171,6 +189,10 @@ const Dashboard = () => {
       
       // TODO: Add back when perishable/expiry fields are added
       const expiredItems = 0;
+      // const expiredItems = inventarisResult.data?.filter(item => {
+      //   if (!item.perishable || !item.tanggal_kedaluwarsa) return false;
+      //   return new Date(item.tanggal_kedaluwarsa) < new Date();
+      // }).length || 0;
 
       // Keuangan stats
       const pemasukanBulanIni = keuanganResult.data?.filter(item => {
@@ -198,38 +220,47 @@ const Dashboard = () => {
       const saldoKas = akunKasData?.reduce((sum, akun) => sum + (akun.saldo_saat_ini || 0), 0) || 0;
 
       // Recent activities
-      const activities: Activity[] = [
+      const activities: RecentActivity[] = [
         ...(transaksiResult.data?.map(t => ({
           type: 'transaksi' as const,
-          message: `Transaksi ${t.tipe.toLowerCase()} ${t.jumlah} unit`,
-          time: t.created_at,
-          icon: Activity
+          message: `Transaksi ${t.tipe?.toLowerCase() || 'unknown'} ${t.jumlah || 0} unit`,
+          time: t.created_at || new Date().toISOString(),
+          icon: Activity,
         })) || []),
         ...(donasiResult.data?.slice(0, 3).map(d => ({
           type: 'donasi' as const,
-          message: `Donasi ${d.jenis_donasi.toLowerCase()} dari ${d.nama_donatur}`,
-          time: d.created_at,
-          icon: Heart
+          message: `Donasi ${d.jenis_donasi?.toLowerCase() || 'unknown'} dari ${d.nama_donatur || 'Unknown'}`,
+          time: d.created_at || d.tanggal_donasi || new Date().toISOString(),
+          icon: Heart,
+          amount: d.jumlah || 0,
         })) || [])
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 5);
 
       // Prepare monthly trend data for last 12 months
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-      const trendData = months.map((month, index) => {
+      const trendData: ChartDataPoint[] = MONTHS.map((month, index) => {
         const monthDonasi = donasiResult.data?.filter(item => {
+          if (!item.tanggal_donasi) return false;
           const itemDate = new Date(item.tanggal_donasi);
           return itemDate.getMonth() === index && itemDate.getFullYear() === currentYear;
         }).reduce((sum, item) => sum + (item.jumlah || 0), 0) || 0;
         
         const monthPemasukan = keuanganResult.data?.filter(item => {
+          if (!item.tanggal) return false;
           const itemDate = new Date(item.tanggal);
           return itemDate.getMonth() === index && itemDate.getFullYear() === currentYear && item.jenis_transaksi === 'Pemasukan';
-        }).reduce((sum, item) => sum + item.jumlah, 0) || 0;
+        }).reduce((sum, item) => sum + (item.jumlah || 0), 0) || 0;
+        
+        const monthPengeluaran = keuanganResult.data?.filter(item => {
+          if (!item.tanggal) return false;
+          const itemDate = new Date(item.tanggal);
+          return itemDate.getMonth() === index && itemDate.getFullYear() === currentYear && item.jenis_transaksi === 'Pengeluaran';
+        }).reduce((sum, item) => sum + (item.jumlah || 0), 0) || 0;
         
         return {
           month,
           donasi: monthDonasi,
           pemasukan: monthPemasukan,
+          pengeluaran: monthPengeluaran,
           total: monthDonasi + monthPemasukan
         };
       });
@@ -255,41 +286,51 @@ const Dashboard = () => {
       setRecentActivities(activities);
 
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      // Error handling - could be enhanced with toast notifications
+      if (error instanceof Error) {
+        console.error('Error fetching dashboard data:', error.message);
+      } else {
+        console.error('Error fetching dashboard data:', error);
+      }
     } finally {
       setLoading(false);
     }
   };
 
 
-  // Chart data dengan warna hijau profesional
-  const donutChartData = [
-    { name: 'Donasi', value: stats.totalDonasi, color: '#10B981' },
-    { name: 'Pemasukan', value: stats.pemasukanBulanIni, color: '#059669' },
-    { name: 'Inventaris', value: Math.max(stats.totalInventaris * 10000, 0), color: '#047857' }
+  // Chart data preparation
+  const inventarisValue = Math.max(stats.totalInventaris * INVENTARIS_VALUE_MULTIPLIER, 0);
+  const totalSales = stats.totalDonasi + stats.pemasukanBulanIni + inventarisValue || 1;
+
+  const breakdownData: BreakdownDataItem[] = [
+    { 
+      name: 'Donasi', 
+      percentage: ((stats.totalDonasi / totalSales) * 100).toFixed(1), 
+      value: stats.totalDonasi, 
+      color: CHART_COLORS.emerald.light 
+    },
+    { 
+      name: 'Pemasukan', 
+      percentage: ((stats.pemasukanBulanIni / totalSales) * 100).toFixed(1), 
+      value: stats.pemasukanBulanIni, 
+      color: CHART_COLORS.emerald.medium 
+    },
+    { 
+      name: 'Inventaris', 
+      percentage: ((inventarisValue / totalSales) * 100).toFixed(1), 
+      value: inventarisValue, 
+      color: CHART_COLORS.emerald.dark 
+    }
   ].filter(item => item.value > 0);
 
-  const totalSales = donutChartData.reduce((sum, item) => sum + item.value, 0) || 1;
-
-  const breakdownData = [
-    { name: 'Donasi', percentage: ((stats.totalDonasi / Math.max(totalSales, 1)) * 100).toFixed(1), value: stats.totalDonasi, color: '#10B981' },
-    { name: 'Pemasukan', percentage: ((stats.pemasukanBulanIni / Math.max(totalSales, 1)) * 100).toFixed(1), value: stats.pemasukanBulanIni, color: '#059669' },
-    { name: 'Inventaris', percentage: (((Math.max(stats.totalInventaris * 10000, 0)) / Math.max(totalSales, 1)) * 100).toFixed(1), value: Math.max(stats.totalInventaris * 10000, 0), color: '#047857' }
-  ].filter(item => item.value > 0);
-
-  const transactionData = [
-    { name: 'Pemasukan', value: stats.pemasukanBulanIni, percentage: stats.pemasukanBulanIni > 0 ? ((stats.pemasukanBulanIni / (stats.pemasukanBulanIni + stats.pengeluaranBulanIni)) * 100).toFixed(1) : '0', color: '#10B981' },
-    { name: 'Pengeluaran', value: stats.pengeluaranBulanIni, percentage: stats.pengeluaranBulanIni > 0 ? ((stats.pengeluaranBulanIni / (stats.pemasukanBulanIni + stats.pengeluaranBulanIni)) * 100).toFixed(1) : '0', color: '#EF4444' },
-    { name: 'Saldo', value: stats.saldoKas, percentage: '100', color: '#3B82F6' }
-  ];
-
-  const CustomTooltip = ({ active, payload }: TooltipProps) => {
-    if (active && payload && payload.length && payload[0]) {
+  const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
+    if (active && payload && payload.length) {
+      const data = payload[0];
       return (
         <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
-          <p className="font-medium text-sm mb-2">{payload[0].name}</p>
-          <p className="text-xs" style={{ color: payload[0].color }}>
-            {formatRupiah(payload[0].value)}
+          <p className="font-medium text-sm mb-2">{data.name}</p>
+          <p className="text-xs" style={{ color: data.color }}>
+            {formatRupiah(data.value)}
           </p>
         </div>
       );
@@ -297,27 +338,34 @@ const Dashboard = () => {
     return null;
   };
 
-  // Calculate trends
-  const calculateTrend = (current: number, previous: number) => {
+  // Calculate trends - comparing current vs estimated previous period
+  const calculateTrend = (current: number, previous: number): TrendData => {
     if (previous === 0) return { percentage: 0, isPositive: current > 0, difference: current };
     const diff = current - previous;
-    const percentage = ((diff / previous) * 100);
-    return { percentage: Math.abs(percentage), isPositive: diff >= 0, difference: diff };
+    const percentage = (Math.abs(diff) / previous) * 100;
+    return { 
+      percentage, 
+      isPositive: diff >= 0, 
+      difference: diff 
+    };
   };
 
-  // Calculate trends (using estimated previous values based on typical variance)
-  // In a real implementation, these should compare against actual previous period data
-  const TREND_VARIANCE_FACTOR = {
-    pemasukan: 0.95,
-    pengeluaran: 1.02,
-    saldo: 0.98,
-    donasi: 0.96,
-  };
-
-  const pemasukanTrend = calculateTrend(stats.pemasukanBulanIni, stats.pemasukanBulanIni * TREND_VARIANCE_FACTOR.pemasukan);
-  const pengeluaranTrend = calculateTrend(stats.pengeluaranBulanIni, stats.pengeluaranBulanIni * TREND_VARIANCE_FACTOR.pengeluaran);
-  const saldoTrend = calculateTrend(stats.saldoKas, stats.saldoKas * TREND_VARIANCE_FACTOR.saldo);
-  const donasiTrend = calculateTrend(stats.donasiBulanIni, stats.donasiBulanIni * TREND_VARIANCE_FACTOR.donasi);
+  const pemasukanTrend = calculateTrend(
+    stats.pemasukanBulanIni, 
+    stats.pemasukanBulanIni * TREND_COMPARISON_MULTIPLIERS.pemasukan
+  );
+  const pengeluaranTrend = calculateTrend(
+    stats.pengeluaranBulanIni, 
+    stats.pengeluaranBulanIni * TREND_COMPARISON_MULTIPLIERS.pengeluaran
+  );
+  const saldoTrend = calculateTrend(
+    stats.saldoKas, 
+    stats.saldoKas * TREND_COMPARISON_MULTIPLIERS.saldo
+  );
+  const donasiTrend = calculateTrend(
+    stats.donasiBulanIni, 
+    stats.donasiBulanIni * TREND_COMPARISON_MULTIPLIERS.donasi
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -330,8 +378,9 @@ const Dashboard = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <Input
                 type="text"
-                placeholder="Search placeholder"
+                placeholder="Cari dashboard..."
                 className="pl-10 w-full bg-gray-50 border-gray-200"
+                disabled
               />
             </div>
           </div>
@@ -570,9 +619,9 @@ const Dashboard = () => {
                   <span className="text-sm font-semibold text-emerald-600">Excellent</span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2.5">
-                  <div className="bg-emerald-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${FINANCE_SCORE_PERCENTAGE}%` }}></div>
+                  <div className="bg-emerald-600 h-2.5 rounded-full transition-all duration-500" style={{ width: '92%' }}></div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{FINANCE_SCORE_PERCENTAGE}%</p>
+                <p className="text-xs text-gray-500 mt-1">92%</p>
               </div>
               <div className="pt-4 border-t border-gray-200">
                 <p className="text-sm text-gray-600 mb-2">Total Balance</p>
@@ -584,7 +633,7 @@ const Dashboard = () => {
                     <span className="text-xs font-medium text-gray-700">Kas Utama</span>
                     <button className="text-xs text-emerald-600 hover:text-emerald-700">Copy</button>
                   </div>
-                  <p className="text-lg font-bold text-gray-900">{formatRupiah(stats.saldoKas * KAS_UTAMA_PERCENTAGE)}</p>
+                  <p className="text-lg font-bold text-gray-900">{formatRupiah(stats.saldoKas * 0.3)}</p>
                   <p className="text-xs text-gray-500 mt-1">**** **** **** 1234</p>
                 </div>
                 <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
@@ -592,7 +641,7 @@ const Dashboard = () => {
                     <span className="text-xs font-medium text-gray-700">Kas Operasional</span>
                     <button className="text-xs text-emerald-600 hover:text-emerald-700">Copy</button>
                   </div>
-                  <p className="text-lg font-bold text-gray-900">{formatRupiah(stats.saldoKas * KAS_OPERASIONAL_PERCENTAGE)}</p>
+                  <p className="text-lg font-bold text-gray-900">{formatRupiah(stats.saldoKas * 0.4)}</p>
                   <p className="text-xs text-gray-500 mt-1">**** **** **** 5678</p>
                 </div>
               </div>
@@ -670,7 +719,7 @@ const Dashboard = () => {
                             </td>
                             <td className="py-4 px-4 text-right">
                               <span className={`text-sm font-semibold ${isPositive ? 'text-emerald-600' : 'text-gray-900'}`}>
-                                {isPositive ? '+' : '-'}{formatRupiah(0)}
+                                {isPositive && '+'}{formatRupiah(activity.amount || 0)}
                               </span>
                             </td>
                             <td className="py-4 px-4 text-center">
@@ -709,32 +758,32 @@ const Dashboard = () => {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-900">Emergency Fund</span>
-                    <span className="text-sm text-gray-600">{formatRupiah(stats.saldoKas * EMERGENCY_FUND_PERCENTAGE)} / {formatRupiah(stats.saldoKas * EMERGENCY_FUND_TARGET_MULTIPLIER)}</span>
+                    <span className="text-sm text-gray-600">{formatRupiah(stats.saldoKas * 0.45)} / {formatRupiah(stats.saldoKas * 2)}</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
-                    <div className="bg-emerald-600 h-2 rounded-full" style={{ width: `${EMERGENCY_FUND_PROGRESS_PERCENTAGE}%` }}></div>
+                    <div className="bg-emerald-600 h-2 rounded-full" style={{ width: '45%' }}></div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">{EMERGENCY_FUND_PROGRESS_PERCENTAGE}%</p>
+                  <p className="text-xs text-gray-500 mt-1">45%</p>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-900">Operational Fund</span>
-                    <span className="text-sm text-gray-600">{formatRupiah(stats.saldoKas * OPERATIONAL_FUND_PERCENTAGE)} / {formatRupiah(stats.saldoKas * OPERATIONAL_FUND_TARGET_MULTIPLIER)}</span>
+                    <span className="text-sm text-gray-600">{formatRupiah(stats.saldoKas * 0.25)} / {formatRupiah(stats.saldoKas * 4)}</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
-                    <div className="bg-emerald-600 h-2 rounded-full" style={{ width: `${OPERATIONAL_FUND_PROGRESS_PERCENTAGE}%` }}></div>
+                    <div className="bg-emerald-600 h-2 rounded-full" style={{ width: '25%' }}></div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">{OPERATIONAL_FUND_PROGRESS_PERCENTAGE}%</p>
+                  <p className="text-xs text-gray-500 mt-1">25%</p>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-900">Development Fund</span>
-                    <span className="text-sm text-gray-600">{formatRupiah(stats.saldoKas * DEVELOPMENT_FUND_PERCENTAGE)} / {formatRupiah(stats.saldoKas * DEVELOPMENT_FUND_TARGET_MULTIPLIER)}</span>
+                    <span className="text-sm text-gray-600">{formatRupiah(stats.saldoKas * 0.5)} / {formatRupiah(stats.saldoKas * 1)}</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
-                    <div className="bg-emerald-600 h-2 rounded-full" style={{ width: `${DEVELOPMENT_FUND_PROGRESS_PERCENTAGE}%` }}></div>
+                    <div className="bg-emerald-600 h-2 rounded-full" style={{ width: '50%' }}></div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">{DEVELOPMENT_FUND_PROGRESS_PERCENTAGE}%</p>
+                  <p className="text-xs text-gray-500 mt-1">50%</p>
                 </div>
               </div>
             </CardContent>

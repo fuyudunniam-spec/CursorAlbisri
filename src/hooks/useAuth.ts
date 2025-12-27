@@ -80,13 +80,12 @@ export function useAuth() {
               return rpcData[0];
             }
             
-            // Fallback: Query directly from santri table
-            // Note: This assumes there's a way to link user_id to santri
-            // If no direct link exists, return null
+            // Fallback: Query directly from santri table using user_id column
+            // Link between auth user and santri is via user_id column in santri table
             const { data: santriData, error: santriError } = await supabase
               .from('santri')
               .select('*')
-              .eq('created_by', userId)
+              .eq('user_id', userId)
               .limit(1)
               .maybeSingle();
             
@@ -116,7 +115,7 @@ export function useAuth() {
                 const { data: santriData, error: santriError } = await supabase
                   .from('santri')
                   .select('*')
-                  .eq('created_by', userId)
+                  .eq('user_id', userId)
                   .limit(1)
                   .maybeSingle();
                 
