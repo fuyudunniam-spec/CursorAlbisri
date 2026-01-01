@@ -526,17 +526,22 @@ const Layout = ({ children }: LayoutProps) => {
 
   // Single useEffect for all navigation logic - MUST be called before any early returns
   useEffect(() => {
+    // Prevent redirect if already on auth page or if we're in the middle of logout
+    if (window.location.pathname === '/auth') {
+      return;
+    }
+
     // Add timeout to prevent infinite redirect loop - reduced to 3 seconds
     const timeoutId = setTimeout(() => {
-      if (authLoading) {
+      if (authLoading && window.location.pathname !== '/auth') {
         console.warn("⚠️ [Layout] Auth loading timeout after 3 seconds - redirecting to auth page");
-        navigate("/auth");
+        navigate("/auth", { replace: true });
       }
     }, 3000); // 3 seconds timeout (reduced from 6)
 
-    // Redirect if no user after loading completes
+    // Redirect if no user after loading completes - use replace to prevent back button issues
     if (!authLoading && !authUser && !session && window.location.pathname !== '/auth') {
-      navigate("/auth");
+      navigate("/auth", { replace: true });
     }
 
     return () => clearTimeout(timeoutId);
@@ -550,6 +555,19 @@ const Layout = ({ children }: LayoutProps) => {
     }
   }, [location.pathname]);
 
+  // Redirect santri users to their profile page when they land on dashboard
+  useEffect(() => {
+    if (!authUser || authLoading) return;
+    if (location.pathname === '/auth') return; // Skip check for auth page
+    
+    // If user is santri and on dashboard (/), redirect to their profile
+    if (authUser.role === 'santri' && authUser.santriId && location.pathname === '/') {
+      const santriName = encodeURIComponent(authUser.name || 'Santri');
+      navigate(`/santri/profile?santriId=${authUser.santriId}&santriName=${santriName}`, { replace: true });
+      return;
+    }
+  }, [authUser, location.pathname, authLoading, navigate]);
+
   // Route protection: Check if user has permission to access current route
   useEffect(() => {
     if (!authUser || authLoading) return;
@@ -561,6 +579,7 @@ const Layout = ({ children }: LayoutProps) => {
     if (!canAccess) {
       console.warn(`[Layout] User ${authUser.email} (${authUser.role}) does not have permission to access ${location.pathname}, redirecting to dashboard`);
       // Redirect to dashboard if user doesn't have permission
+      // Note: Santri users will be redirected to their profile by the redirect logic above
       navigate('/', { replace: true });
     }
   }, [authUser, location.pathname, authLoading, navigate]);

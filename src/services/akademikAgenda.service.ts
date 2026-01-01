@@ -423,5 +423,3 @@ export class AkademikAgendaService {
     if (error) throw error;
   }
 }
-
-

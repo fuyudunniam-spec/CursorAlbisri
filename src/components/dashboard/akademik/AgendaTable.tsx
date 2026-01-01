@@ -264,4 +264,3 @@ export const AgendaTable: React.FC<AgendaTableProps> = ({
   );
 };
 
-

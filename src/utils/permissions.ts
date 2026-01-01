@@ -34,7 +34,7 @@ const PERMISSION_MATRIX: Record<AppRole, string[] | '*' > = {
   admin: '*', // Full access to all modules (always - simplified approach)
   staff: [], // Flexible access - uses allowedModules field (must have explicit modules configured)
   pengajar: ['dashboard', 'monitoring', 'settings'], // Access to pengajar profile and monitoring
-  santri: ['dashboard', 'tabungan', 'settings'], // Access to santri profile and tabungan only
+  santri: ['dashboard', 'santri', 'tabungan', 'settings'], // Access to santri profile (their own), tabungan, and settings
 };
 
 /**

@@ -406,11 +406,38 @@ export function useAuth() {
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setSession(null);
-    localStorage.removeItem("test_role_override");
-    setTestRoleOverride(null);
+    try {
+      // Set flag to prevent redirect loops during logout
+      sessionStorage.setItem('is_logging_out', 'true');
+      
+      // Clear all localStorage cache related to user/auth
+      // Collect keys first to avoid modifying localStorage during iteration
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('user_roles_') || key === 'test_role_override')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      
+      // Clear React state
+      setUser(null);
+      setSession(null);
+      setTestRoleOverride(null);
+      
+      // Sign out from Supabase auth
+      await supabase.auth.signOut();
+      
+      // Force full page reload to auth page to ensure clean state
+      // Using window.location.href instead of navigate() to prevent race conditions
+      // and ensure all React state, subscriptions, and effects are completely reset
+      window.location.href = '/auth';
+    } catch (error) {
+      logger.error("Error during logout:", error);
+      // Always redirect to auth page even if logout fails
+      window.location.href = '/auth';
+    }
   };
 
   const refreshRole = useCallback(async () => {

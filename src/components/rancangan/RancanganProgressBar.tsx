@@ -95,9 +95,3 @@ const RancanganProgressBar: React.FC<RancanganProgressBarProps> = ({
 
 export default RancanganProgressBar;
 
-
-
-
-
-
-

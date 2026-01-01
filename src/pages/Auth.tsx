@@ -25,11 +25,18 @@ export default function Auth() {
   const [registerFullName, setRegisterFullName] = useState('');
   const [registerPhone, setRegisterPhone] = useState('');
 
-  // Check if user is already logged in
+  // Check if user is already logged in (only on component mount)
   useEffect(() => {
     const checkSession = async () => {
       try {
-        // Use timeout untuk prevent hang
+        // Skip check if logout is in progress to prevent redirect loop
+        const isLoggingOut = sessionStorage.getItem('is_logging_out');
+        if (isLoggingOut) {
+          sessionStorage.removeItem('is_logging_out');
+          return;
+        }
+
+        // Check for existing session with timeout to prevent hanging
         const sessionPromise = supabase.auth.getSession();
         const timeoutPromise = new Promise((resolve) => 
           setTimeout(() => resolve({ data: { session: null } }), 2000)
@@ -37,14 +44,18 @@ export default function Auth() {
         
         const result: any = await Promise.race([sessionPromise, timeoutPromise]);
         if (result?.data?.session) {
-          navigate('/');
+          // User already has active session, redirect to dashboard
+          // Layout component will handle routing (e.g., redirect santri to profile)
+          navigate('/', { replace: true });
         }
       } catch (err) {
         console.error('Error checking session:', err);
       }
     };
+    
     checkSession();
-  }, [navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount, don't re-run on every render
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,135 +111,12 @@ export default function Auth() {
         }
       } else {
         console.log('✅ [Auth] Login successful!', { userId: data.user?.id, email: data.user?.email });
+        setSuccess('Login berhasil! Mengarahkan...');
         
-        // Wait a bit for session to be set in localStorage
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Verify session was created with timeout
-        const verifySession = async () => {
-          try {
-            const sessionPromise = supabase.auth.getSession();
-            const timeoutPromise = new Promise((resolve) => 
-              setTimeout(() => resolve({ data: { session: null } }), 2000)
-            );
-            const result: any = await Promise.race([sessionPromise, timeoutPromise]);
-            return result?.data?.session;
-          } catch (err) {
-            console.error('Error verifying session:', err);
-            return null;
-          }
-        };
-        
-        const session = await verifySession();
-        if (session) {
-          console.log('✅ [Auth] Session verified, redirecting...');
-          setSuccess('Login berhasil!');
-        } else {
-          // Even if getSession timeout, if login was successful, data.user exists
-          // So we can still redirect - useAuth will pick up session from localStorage
-          console.log('⚠️ [Auth] getSession timeout, but login data exists. Redirecting anyway...');
-          setSuccess('Login berhasil!');
-        }
-        
-        // Check user role to determine redirect destination
-        // For santri, redirect to their profile page
-        setTimeout(async () => {
-          try {
-            // Try to get user role from session metadata or check via RPC
-            const { data: { session: checkSession } } = await supabase.auth.getSession();
-            
-            if (checkSession?.user?.id) {
-              // Check if user is santri by checking user_roles or santri table
-              const { data: rolesData } = await supabase
-                .from('user_roles')
-                .select('role')
-                .eq('user_id', checkSession.user.id)
-                .limit(1);
-              
-              const isSantri = rolesData?.some(r => r.role === 'santri');
-              
-              if (isSantri) {
-                // Get santri ID using RPC function with timeout and error handling
-                let santriData: any = null;
-                let santriError: any = null;
-                
-                try {
-                  const result: any = await Promise.race([
-                    supabase.rpc('get_santri_by_user_id', { p_user_id: checkSession.user.id }),
-                    new Promise((resolve) => 
-                      setTimeout(() => resolve({ data: null, error: { message: 'RPC timeout' } }), 3000)
-                    )
-                  ]);
-                  
-                  santriData = result.data;
-                  santriError = result.error;
-                  
-                  // Check if it's a CORS/network error - silently fail
-                  if (santriError && (
-                    santriError.message?.includes('CORS') || 
-                    santriError.message?.includes('520') || 
-                    santriError.message?.includes('523') || 
-                    santriError.message?.includes('Failed to fetch') ||
-                    santriError.message?.includes('unreachable') ||
-                    santriError.message?.includes('Access-Control-Allow-Origin')
-                  )) {
-                    santriError = null; // Silently ignore network errors
-                    santriData = null;
-                  }
-                } catch (err: any) {
-                  // Silently handle network errors
-                  if (!err?.message?.includes('CORS') && 
-                      !err?.message?.includes('520') && 
-                      !err?.message?.includes('523') && 
-                      !err?.message?.includes('Failed to fetch')) {
-                    console.warn('⚠️ [Auth] Error fetching santri data:', err);
-                  }
-                  santriError = err;
-                  santriData = null;
-                }
-                
-                // RPC returns array, get first item
-                const santri = Array.isArray(santriData) && santriData.length > 0 ? santriData[0] : null;
-                
-                if (santri?.id) {
-                  console.log('🔐 [Auth] Redirecting santri:', {
-                    santriId: santri.id,
-                    idSantri: santri.id_santri,
-                    nama: santri.nama_lengkap
-                  });
-                  
-                  // Check profile completion
-                  try {
-                    const { SantriOnboardingService } = await import('@/services/santriOnboarding.service');
-                    const completion = await SantriOnboardingService.checkProfileCompletion(santri.id);
-                    
-                    if (!completion.isComplete && !completion.canSkipOnboarding) {
-                      // Redirect to onboarding if profile is incomplete
-                      console.log('📋 [Auth] Profile incomplete, redirecting to onboarding');
-                      window.location.href = `/santri/onboarding?santriId=${santri.id}`;
-                      return;
-                    }
-                  } catch (onboardingError) {
-                    console.warn('⚠️ [Auth] Error checking profile completion, redirecting to profile:', onboardingError);
-                  }
-                  
-                  // Redirect to santri profile if complete or can skip
-                  window.location.href = `/santri/profile?santriId=${santri.id}&santriName=${encodeURIComponent(santri.nama_lengkap || 'Santri')}`;
-                  return;
-                } else {
-                  console.warn('⚠️ [Auth] Santri role detected but santri data not found:', santriError);
-                }
-              }
-            }
-            
-            // Default redirect to dashboard for admin/staff
-            window.location.href = '/';
-          } catch (err) {
-            console.error('Error determining redirect:', err);
-            // Fallback to dashboard
-            window.location.href = '/';
-          }
-        }, 500);
+        // Redirect to dashboard - useAuth hook and Layout component will handle proper routing
+        // This prevents race conditions and multiple redirects by centralizing redirect logic
+        // For santri users, Layout will automatically redirect to their profile page
+        navigate('/', { replace: true });
       }
     } catch (err: any) {
       console.error('❌ [Auth] Login exception:', err);

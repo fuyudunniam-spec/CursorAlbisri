@@ -432,9 +432,3 @@ export default function RiwayatPembelian() {
 
 
 
-
-
-
-
-
-
