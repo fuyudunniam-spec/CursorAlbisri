@@ -9,8 +9,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Search, X } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, X, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+
+// Constants
+const ITEMS_PER_PAGE = 20;
+const PROGRAM_OPTIONS: Array<{ value: 'Madin' | 'TPQ' | 'Tahfid' | 'Tahsin' | 'Umum'; label: string }> = [
+  { value: 'Madin', label: 'Madin' },
+  { value: 'TPQ', label: 'TPQ' },
+  { value: 'Tahfid', label: 'Tahfid' },
+  { value: 'Tahsin', label: 'Tahsin' },
+  { value: 'Umum', label: 'Umum' },
+] as const;
+
+const STATUS_OPTIONS: Array<{ value: 'Aktif' | 'Non-Aktif'; label: string }> = [
+  { value: 'Aktif', label: 'Aktif' },
+  { value: 'Non-Aktif', label: 'Non-Aktif' },
+] as const;
 
 type ProgramType = 'Madin' | 'TPQ' | 'Tahfid' | 'Tahsin' | 'Umum';
 type StatusType = 'Aktif' | 'Non-Aktif';
@@ -30,6 +45,10 @@ interface MapelFormData {
   catatan: string;
 }
 
+interface ErrorWithMessage {
+  message?: string;
+}
+
 const MapelMasterPage: React.FC = () => {
   const { user } = useAuth();
   const isAdminOrStaff = user?.role === 'admin' || user?.role === 'staff';
@@ -38,7 +57,9 @@ const MapelMasterPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMapel, setEditingMapel] = useState<Mapel | null>(null);
@@ -55,8 +76,10 @@ const MapelMasterPage: React.FC = () => {
       setLoading(true);
       const data = await AkademikAgendaService.listMapel({ status: 'Semua' });
       setMapelList(data);
-    } catch (e: any) {
-      toast.error(e.message || 'Gagal memuat data mapel');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error as ErrorWithMessage).message || 'Gagal memuat data mapel';
+      toast.error(errorMessage);
+      console.error('Error loading mapel:', error);
     } finally {
       setLoading(false);
     }
@@ -73,11 +96,17 @@ const MapelMasterPage: React.FC = () => {
   }, [mapelList, searchTerm]);
 
   const paginatedMapel = React.useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredMapel.slice(start, start + itemsPerPage);
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredMapel.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredMapel, currentPage]);
 
-  const totalPages = Math.ceil(filteredMapel.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredMapel.length / ITEMS_PER_PAGE);
+
+  const paginationInfo = React.useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+    const end = Math.min(currentPage * ITEMS_PER_PAGE, filteredMapel.length);
+    return { start, end, total: filteredMapel.length };
+  }, [currentPage, filteredMapel.length]);
 
   const handleOpenDialog = (mapel?: Mapel) => {
     if (mapel) {
@@ -103,58 +132,79 @@ const MapelMasterPage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.nama_mapel.trim()) {
+    const trimmedNama = formData.nama_mapel.trim();
+    if (!trimmedNama) {
       toast.error('Nama mapel wajib diisi');
       return;
     }
 
+    if (trimmedNama.length < 2) {
+      toast.error('Nama mapel minimal 2 karakter');
+      return;
+    }
+
     try {
+      setSaving(true);
+      const payload = {
+        nama_mapel: trimmedNama,
+        kode_mapel: formData.kode_mapel.trim() || null,
+        program: formData.program,
+        status: formData.status,
+        catatan: formData.catatan.trim() || null,
+      };
+
       if (editingMapel) {
-        await AkademikAgendaService.updateMapel(editingMapel.id, {
-          nama_mapel: formData.nama_mapel.trim(),
-          kode_mapel: formData.kode_mapel.trim() || null,
-          program: formData.program,
-          status: formData.status,
-          catatan: formData.catatan.trim() || null,
-        });
+        await AkademikAgendaService.updateMapel(editingMapel.id, payload);
         toast.success('Mapel berhasil diperbarui');
       } else {
-        await AkademikAgendaService.createMapel({
-          nama_mapel: formData.nama_mapel.trim(),
-          kode_mapel: formData.kode_mapel.trim() || null,
-          program: formData.program,
-          status: formData.status,
-          catatan: formData.catatan.trim() || null,
-        });
+        await AkademikAgendaService.createMapel(payload);
         toast.success('Mapel berhasil ditambahkan');
       }
       setDialogOpen(false);
-      loadMapel();
-    } catch (e: any) {
-      toast.error(e.message || 'Gagal menyimpan mapel');
+      await loadMapel();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error as ErrorWithMessage).message || 'Gagal menyimpan mapel';
+      toast.error(errorMessage);
+      console.error('Error saving mapel:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Hapus mapel ini? Tindakan ini tidak dapat dibatalkan.')) return;
+    if (!window.confirm('Hapus mapel ini? Tindakan ini tidak dapat dibatalkan.')) {
+      return;
+    }
+
     try {
+      setDeletingId(id);
       await AkademikAgendaService.deleteMapel(id);
       toast.success('Mapel berhasil dihapus');
-      loadMapel();
-    } catch (e: any) {
-      toast.error(e.message || 'Gagal menghapus mapel');
+      await loadMapel();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error as ErrorWithMessage).message || 'Gagal menghapus mapel';
+      toast.error(errorMessage);
+      console.error('Error deleting mapel:', error);
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const handleToggleStatus = async (mapel: Mapel) => {
     try {
+      setTogglingId(mapel.id);
+      const newStatus = mapel.status === 'Aktif' ? 'Non-Aktif' : 'Aktif';
       await AkademikAgendaService.updateMapel(mapel.id, {
-        status: mapel.status === 'Aktif' ? 'Non-Aktif' : 'Aktif',
+        status: newStatus,
       });
       toast.success(`Mapel ${mapel.status === 'Aktif' ? 'dinonaktifkan' : 'diaktifkan'}`);
-      loadMapel();
-    } catch (e: any) {
-      toast.error(e.message || 'Gagal mengubah status');
+      await loadMapel();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : (error as ErrorWithMessage).message || 'Gagal mengubah status';
+      toast.error(errorMessage);
+      console.error('Error toggling status:', error);
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -166,7 +216,7 @@ const MapelMasterPage: React.FC = () => {
           <p className="text-sm text-muted-foreground">Kelola data mata pelajaran</p>
         </div>
         {isAdminOrStaff && (
-          <Button onClick={() => handleOpenDialog()}>
+          <Button onClick={() => handleOpenDialog()} aria-label="Tambah mapel baru">
             <Plus className="w-4 h-4 mr-2" />
             Tambah Mapel
           </Button>
@@ -184,6 +234,7 @@ const MapelMasterPage: React.FC = () => {
             }}
             placeholder="Cari mapel..."
             className="pl-8"
+            aria-label="Cari mapel"
           />
           {searchTerm && (
             <Button
@@ -215,7 +266,10 @@ const MapelMasterPage: React.FC = () => {
             {loading ? (
               <TableRow>
                 <TableCell colSpan={isAdminOrStaff ? 4 : 3} className="text-center text-muted-foreground">
-                  Memuat...
+                  <div className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Memuat...
+                  </div>
                 </TableCell>
               </TableRow>
             ) : paginatedMapel.length === 0 ? (
@@ -241,13 +295,20 @@ const MapelMasterPage: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleToggleStatus(mapel)}
+                          disabled={togglingId === mapel.id}
+                          aria-label={mapel.status === 'Aktif' ? 'Nonaktifkan mapel' : 'Aktifkan mapel'}
                         >
-                          {mapel.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}
+                          {togglingId === mapel.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            mapel.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'
+                          )}
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleOpenDialog(mapel)}
+                          aria-label="Edit mapel"
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
@@ -255,8 +316,14 @@ const MapelMasterPage: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(mapel.id)}
+                          disabled={deletingId === mapel.id}
+                          aria-label="Hapus mapel"
                         >
-                          <Trash2 className="w-4 h-4 text-red-600" />
+                          {deletingId === mapel.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-red-600" />
+                          ) : (
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          )}
                         </Button>
                       </div>
                     </TableCell>
@@ -271,7 +338,7 @@ const MapelMasterPage: React.FC = () => {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
-            Menampilkan {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, filteredMapel.length)} dari {filteredMapel.length} mapel
+            Menampilkan {paginationInfo.start} - {paginationInfo.end} dari {paginationInfo.total} mapel
           </p>
           <div className="flex gap-2">
             <Button
@@ -279,6 +346,7 @@ const MapelMasterPage: React.FC = () => {
               size="sm"
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
+              aria-label="Halaman sebelumnya"
             >
               Sebelumnya
             </Button>
@@ -287,6 +355,7 @@ const MapelMasterPage: React.FC = () => {
               size="sm"
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage === totalPages}
+              aria-label="Halaman selanjutnya"
             >
               Selanjutnya
             </Button>
@@ -304,61 +373,84 @@ const MapelMasterPage: React.FC = () => {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <Label>Nama Mapel *</Label>
+              <Label htmlFor="nama-mapel">Nama Mapel *</Label>
               <Input
+                id="nama-mapel"
                 value={formData.nama_mapel}
                 onChange={(e) => setFormData(prev => ({ ...prev, nama_mapel: e.target.value }))}
                 placeholder="Contoh: Fiqih"
+                maxLength={100}
+                required
               />
             </div>
             <div>
-              <Label>Program</Label>
+              <Label htmlFor="kode-mapel">Kode Mapel</Label>
+              <Input
+                id="kode-mapel"
+                value={formData.kode_mapel}
+                onChange={(e) => setFormData(prev => ({ ...prev, kode_mapel: e.target.value }))}
+                placeholder="Contoh: FQH"
+                maxLength={20}
+              />
+            </div>
+            <div>
+              <Label htmlFor="program">Program</Label>
               <Select
                 value={formData.program}
                 onValueChange={(value) => setFormData(prev => ({ ...prev, program: value as ProgramType }))}
               >
-                <SelectTrigger>
+                <SelectTrigger id="program">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Madin">Madin</SelectItem>
-                  <SelectItem value="TPQ">TPQ</SelectItem>
-                  <SelectItem value="Tahfid">Tahfid</SelectItem>
-                  <SelectItem value="Tahsin">Tahsin</SelectItem>
-                  <SelectItem value="Umum">Umum</SelectItem>
+                  {PROGRAM_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Status</Label>
+              <Label htmlFor="status">Status</Label>
               <Select
                 value={formData.status}
                 onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as StatusType }))}
               >
-                <SelectTrigger>
+                <SelectTrigger id="status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Aktif">Aktif</SelectItem>
-                  <SelectItem value="Non-Aktif">Non-Aktif</SelectItem>
+                  {STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Catatan</Label>
+              <Label htmlFor="catatan">Catatan</Label>
               <Textarea
+                id="catatan"
                 value={formData.catatan}
                 onChange={(e) => setFormData(prev => ({ ...prev, catatan: e.target.value }))}
                 rows={3}
                 placeholder="Catatan opsional"
+                maxLength={500}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setDialogOpen(false)}
+              disabled={saving}
+            >
               Batal
             </Button>
-            <Button onClick={handleSave}>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Simpan
             </Button>
           </DialogFooter>
