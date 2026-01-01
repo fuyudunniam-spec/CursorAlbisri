@@ -292,17 +292,30 @@ export const getCategoryData = async (
  * 
  * @param categoryName - Nama kategori yang akan di-drill-down
  * @param accountId - Optional account ID untuk filter by account
+ * @param startDateFilter - Optional start date filter (YYYY-MM-DD format)
+ * @param endDateFilter - Optional end date filter (YYYY-MM-DD format)
  * @returns Array of sub category data dengan percentage dan color
  */
 export const getSubCategoryDataByCategory = async (
   categoryName: string,
-  accountId?: string
+  accountId?: string,
+  startDateFilter?: string,
+  endDateFilter?: string
 ): Promise<CategoryChartData[]> => {
   try {
-    // Get current year expenditures
-    const currentYear = new Date().getFullYear();
-    const startDate = `${currentYear}-01-01`;
-    const endDate = `${currentYear}-12-31`;
+    // Use custom date range if provided, otherwise use current year
+    let startDate: string;
+    let endDate: string;
+    
+    if (startDateFilter && endDateFilter) {
+      startDate = startDateFilter;
+      endDate = endDateFilter;
+    } else {
+      // Fallback to current year if no date range provided
+      const currentYear = new Date().getFullYear();
+      startDate = `${currentYear}-01-01`;
+      endDate = `${currentYear}-12-31`;
+    }
     
     let query = supabase
       .from('keuangan')

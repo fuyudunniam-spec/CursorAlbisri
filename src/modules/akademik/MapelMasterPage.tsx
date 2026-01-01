@@ -12,11 +12,22 @@ import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Search, X } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
+type ProgramType = 'Madin' | 'TPQ' | 'Tahfid' | 'Tahsin' | 'Umum';
+type StatusType = 'Aktif' | 'Non-Aktif';
+
 interface Mapel {
   id: string;
   nama_mapel: string;
   program: string;
-  status: 'Aktif' | 'Non-Aktif';
+  status: StatusType;
+}
+
+interface MapelFormData {
+  nama_mapel: string;
+  kode_mapel: string;
+  program: ProgramType;
+  status: StatusType;
+  catatan: string;
 }
 
 const MapelMasterPage: React.FC = () => {
@@ -31,11 +42,11 @@ const MapelMasterPage: React.FC = () => {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMapel, setEditingMapel] = useState<Mapel | null>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<MapelFormData>({
     nama_mapel: '',
     kode_mapel: '',
-    program: 'Madin' as 'Madin' | 'TPQ' | 'Tahfid' | 'Tahsin' | 'Umum',
-    status: 'Aktif' as 'Aktif' | 'Non-Aktif',
+    program: 'Madin',
+    status: 'Aktif',
     catatan: '',
   });
 
@@ -74,7 +85,7 @@ const MapelMasterPage: React.FC = () => {
       setFormData({
         nama_mapel: mapel.nama_mapel,
         kode_mapel: '',
-        program: mapel.program as any,
+        program: mapel.program as ProgramType,
         status: mapel.status,
         catatan: '',
       });
@@ -304,7 +315,7 @@ const MapelMasterPage: React.FC = () => {
               <Label>Program</Label>
               <Select
                 value={formData.program}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, program: value as any }))}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, program: value as ProgramType }))}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -322,7 +333,7 @@ const MapelMasterPage: React.FC = () => {
               <Label>Status</Label>
               <Select
                 value={formData.status}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as 'Aktif' | 'Non-Aktif' }))}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as StatusType }))}
               >
                 <SelectTrigger>
                   <SelectValue />

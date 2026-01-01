@@ -20,6 +20,8 @@ interface ChartsSectionProps {
   }>;
   selectedAccountId?: string;
   selectedAccountName?: string;
+  startDateFilter?: string; // Optional start date filter (YYYY-MM-DD format) for sub category drill-down
+  endDateFilter?: string; // Optional end date filter (YYYY-MM-DD format) for sub category drill-down
 }
 
 const EmptyStateCard: React.FC<{ 
@@ -65,7 +67,9 @@ const ChartsSection: React.FC<ChartsSectionProps> = ({
   monthlyData = [], 
   categoryData = [],
   selectedAccountId,
-  selectedAccountName
+  selectedAccountName,
+  startDateFilter,
+  endDateFilter
 }) => {
   // State untuk inline drill-down (bukan modal)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -90,7 +94,13 @@ const ChartsSection: React.FC<ChartsSectionProps> = ({
     setLoadingSubCategory(true);
     
     try {
-      const subData = await getSubCategoryDataByCategory(categoryName, selectedAccountId);
+      // Pass date range to getSubCategoryDataByCategory to ensure it uses the same period as the main chart
+      const subData = await getSubCategoryDataByCategory(
+        categoryName, 
+        selectedAccountId,
+        startDateFilter,
+        endDateFilter
+      );
       // Group sub kategori kosong sebagai "(Tanpa Sub Kategori)"
       const processedData = subData.map(item => ({
         ...item,
@@ -419,9 +429,13 @@ const ChartsSection: React.FC<ChartsSectionProps> = ({
                         outerRadius={100}
                         paddingAngle={5}
                         dataKey="value"
-                        onClick={(data: any) => {
-                          if (data && data.name) {
-                            handleCategoryClick(data.name);
+                        isAnimationActive={true}
+                        onClick={(data: any, index: number, e: any) => {
+                          // Handle click on pie slice
+                          // Data structure: data contains { name, value, payload, ... }
+                          const categoryName = data?.name || data?.payload?.name || (categoryData[index]?.name);
+                          if (categoryName) {
+                            handleCategoryClick(categoryName);
                           }
                         }}
                         style={{ cursor: 'pointer' }}

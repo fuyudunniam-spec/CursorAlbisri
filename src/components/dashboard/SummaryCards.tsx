@@ -27,6 +27,11 @@ interface SummaryCardsProps {
     jumlahTransaksiPengeluaran?: number;
     danaTerikat?: number;
     danaTidakTerikat?: number;
+    penyesuaianSaldoInfo?: {
+      jumlah: number;
+      jumlahTransaksi: number;
+      adaPenyesuaian: boolean;
+    };
   };
   selectedAccountName?: string;
   periodLabel?: string; // Label untuk periode yang dipilih (e.g., "Bulan Ini", "Bulan Lalu", "3 Bulan Terakhir")
@@ -62,10 +67,19 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({
   const danaTidakTerikat = stats.danaTidakTerikat ?? stats.totalSaldo;
   const totalDana = danaTerikat + danaTidakTerikat;
 
+  // Prepare penyesuaian saldo info for Total Saldo card
+  const penyesuaianSaldoInfo = stats.penyesuaianSaldoInfo;
+  let totalSaldoSubtitle: string | undefined;
+  if (penyesuaianSaldoInfo?.adaPenyesuaian && penyesuaianSaldoInfo.jumlahTransaksi > 0) {
+    const sign = penyesuaianSaldoInfo.jumlah >= 0 ? '+' : '';
+    totalSaldoSubtitle = `Penyesuaian saldo: ${sign}${formatCurrency(Math.abs(penyesuaianSaldoInfo.jumlah))} (${penyesuaianSaldoInfo.jumlahTransaksi} transaksi)`;
+  }
+
   const cards: StatCard[] = [
     {
       title: 'Total Saldo',
       value: formatCurrency(stats.totalSaldo),
+      subtitle: totalSaldoSubtitle,
       icon: <DollarSign className="h-5 w-5" />,
       color: 'text-blue-600',
     },

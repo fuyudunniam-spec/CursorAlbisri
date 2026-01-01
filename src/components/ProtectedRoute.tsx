@@ -44,3 +44,5 @@ export default function ProtectedRoute({ children, path }: ProtectedRouteProps) 
   return <>{children}</>;
 }
 
+
+

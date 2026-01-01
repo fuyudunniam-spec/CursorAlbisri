@@ -331,6 +331,7 @@ const RiwayatPenyaluranBantuanPage: React.FC = () => {
                 jumlahTransaksiPengeluaran: financialStats.totalPengeluaranTransaksi,
                 danaTerikat: financialStats.danaTerikat,
                 danaTidakTerikat: financialStats.danaTidakTerikat,
+                penyesuaianSaldoInfo: financialStats.penyesuaianSaldoInfo,
               }}
               periodLabel={
                 filters.startDate && filters.endDate
@@ -353,6 +354,8 @@ const RiwayatPenyaluranBantuanPage: React.FC = () => {
           <ChartsSection 
             monthlyData={monthlyCashflow}
             categoryData={categoryData}
+            startDateFilter={filters.startDate}
+            endDateFilter={filters.endDate}
           />
 
           {/* Top Recipients Chart */}

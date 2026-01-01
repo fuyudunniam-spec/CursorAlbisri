@@ -698,6 +698,11 @@ export interface FinancialStatsByDateRange {
   danaTidakTerikat: number;
   pemasukanTrend: number;
   pengeluaranTrend: number;
+  penyesuaianSaldoInfo?: {
+    jumlah: number; // Net penyesuaian saldo (pemasukan - pengeluaran) dalam periode
+    jumlahTransaksi: number; // Jumlah transaksi penyesuaian saldo
+    adaPenyesuaian: boolean; // Flag apakah ada penyesuaian saldo dalam periode
+  };
 }
 
 export const getFinancialStatsByDateRange = async (
@@ -804,6 +809,21 @@ export const getFinancialStatsByDateRange = async (
       pengeluaranTrend = calculateTrend(pengeluaran, prevPengeluaran);
     }
     
+    // Calculate penyesuaian saldo info (check if there are "Penyesuaian Saldo" transactions)
+    const penyesuaianSaldoTransactions = filteredTransactions.filter(
+      t => t.kategori === 'Penyesuaian Saldo'
+    );
+    
+    const penyesuaianSaldoPemasukan = penyesuaianSaldoTransactions
+      .filter(t => t.jenis_transaksi === 'Pemasukan')
+      .reduce((sum, t) => sum + (Number(t.jumlah) || 0), 0);
+    
+    const penyesuaianSaldoPengeluaran = penyesuaianSaldoTransactions
+      .filter(t => t.jenis_transaksi === 'Pengeluaran')
+      .reduce((sum, t) => sum + (Number(t.jumlah) || 0), 0);
+    
+    const netPenyesuaianSaldo = penyesuaianSaldoPemasukan - penyesuaianSaldoPengeluaran;
+    
     return {
       totalSaldo,
       pemasukan,
@@ -814,6 +834,11 @@ export const getFinancialStatsByDateRange = async (
       danaTidakTerikat,
       pemasukanTrend,
       pengeluaranTrend,
+      penyesuaianSaldoInfo: {
+        jumlah: netPenyesuaianSaldo,
+        jumlahTransaksi: penyesuaianSaldoTransactions.length,
+        adaPenyesuaian: penyesuaianSaldoTransactions.length > 0,
+      },
     };
   } catch (error) {
     console.error('Error in getFinancialStatsByDateRange:', error);

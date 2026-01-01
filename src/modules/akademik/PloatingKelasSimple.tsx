@@ -497,3 +497,4 @@ const PloatingKelasSimple: React.FC = () => {
 };
 
 export default PloatingKelasSimple;
+
