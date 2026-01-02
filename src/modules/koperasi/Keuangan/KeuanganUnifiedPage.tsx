@@ -32,6 +32,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar, AlertCircle, ExternalLink, Package } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { MonthYearFilter } from '@/components/filters/MonthYearFilter';
 
 const KeuanganUnifiedPage: React.FC = () => {
   const navigate = useNavigate();
@@ -355,6 +356,7 @@ const KeuanganUnifiedPage: React.FC = () => {
         .map(akun => akun.id);
       
       if (koperasiAccountIds.length === 0) {
+        console.log('[calculatePeriodSummary] No koperasi accounts found');
         setPeriodSummary({ pemasukan: 0, pengeluaran: 0, labaRugi: 0 });
         return;
       }
@@ -363,6 +365,12 @@ const KeuanganUnifiedPage: React.FC = () => {
       const accountIdsToUse = selectedAccountFilter 
         ? [selectedAccountFilter]
         : koperasiAccountIds;
+      
+      console.log('[calculatePeriodSummary] Filter:', {
+        dateFilter,
+        accountIds: accountIdsToUse,
+        dateRange: dateFilter === 'all' ? 'ALL DATA' : `${startDateStr} - ${endDateStr}`
+      });
       
       // 1. Get total pemasukan dari riwayat transaksi (SEMUA pemasukan koperasi, termasuk manual input)
       // Ini memastikan data yang ditampilkan sinkron dengan riwayat transaksi yang sebenarnya
@@ -381,7 +389,11 @@ const KeuanganUnifiedPage: React.FC = () => {
           .lte('tanggal', endDateStr);
       }
       
-      const { data: pemasukanData } = await pemasukanQuery;
+      const { data: pemasukanData, error: pemasukanError } = await pemasukanQuery;
+      
+      if (pemasukanError) {
+        console.error('[calculatePeriodSummary] Error fetching pemasukan:', pemasukanError);
+      }
       
       const totalPemasukan = (pemasukanData || []).reduce(
         (sum, item) => sum + parseFloat(item.jumlah || 0), 0
@@ -905,28 +917,37 @@ const KeuanganUnifiedPage: React.FC = () => {
       if (koperasiAccountIds.length === 0) return [];
 
       const { startDate: filterStartDate, endDate: filterEndDate } = getDateRange();
-      const twelveMonthsAgo = new Date();
-      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
       
       // Query dari kedua tabel (sama seperti di loadData)
       let queryKoperasi = supabase
         .from('keuangan_koperasi')
         .select('*')
-        .in('akun_kas_id', koperasiAccountIds)
-        .gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0])
-        .order('tanggal', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1000);
+        .in('akun_kas_id', koperasiAccountIds);
       
       let queryKeuangan = supabase
         .from('keuangan')
         .select('*')
         .eq('source_module', 'koperasi')
-        .in('akun_kas_id', koperasiAccountIds)
-        .gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0])
+        .in('akun_kas_id', koperasiAccountIds);
+      
+      // Hanya filter tanggal jika BUKAN 'all'
+      // Untuk filter 'all', ambil semua data tanpa batasan tanggal
+      if (dateFilter !== 'all') {
+        const twelveMonthsAgo = new Date();
+        twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+        queryKoperasi = queryKoperasi.gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0]);
+        queryKeuangan = queryKeuangan.gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0]);
+      }
+      
+      queryKoperasi = queryKoperasi
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
-        .limit(1000);
+        .limit(dateFilter === 'all' ? 5000 : 1000); // Limit lebih tinggi untuk 'all'
+      
+      queryKeuangan = queryKeuangan
+        .order('tanggal', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(dateFilter === 'all' ? 5000 : 1000); // Limit lebih tinggi untuk 'all'
       
       // Apply account filter if selected (sama dengan tabel riwayat)
       if (selectedAccountFilter) {
@@ -960,10 +981,13 @@ const KeuanganUnifiedPage: React.FC = () => {
       const allTransactions = Array.from(transactionMap.values());
 
       // Apply date filter (sama dengan tabel riwayat)
-      const filteredByDate = allTransactions.filter(tx => {
-        const txDate = new Date(tx.tanggal);
-        return txDate >= filterStartDate && txDate <= filterEndDate;
-      });
+      // IMPORTANT: Untuk filter 'all', return semua transaksi tanpa filter tanggal
+      const filteredByDate = dateFilter === 'all' 
+        ? allTransactions // Return all transactions for 'all' filter
+        : allTransactions.filter(tx => {
+            const txDate = new Date(tx.tanggal);
+            return txDate >= filterStartDate && txDate <= filterEndDate;
+          });
 
       // Get processed months for filtering (sama seperti di loadData)
       const { data: bagiHasilLogs } = await supabase
@@ -1546,30 +1570,18 @@ const KeuanganUnifiedPage: React.FC = () => {
         return;
       }
 
-      // Fetch data for a wider range (last 12 months) to allow client-side filtering
+      // Fetch data based on filter
+      // For 'all' filter, fetch all data (no date limit)
+      // For other filters, fetch last 12 months to allow client-side filtering
       const now = new Date();
-      const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 12, 1);
-
-      // Get transactions from keuangan_koperasi table
       let queryKoperasi = supabase
         .from('keuangan_koperasi')
         .select(`
           *,
           akun_kas:akun_kas_id(nama, managed_by)
         `)
-        .in('akun_kas_id', koperasiAccountIds)
-        .gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0])
-        .order('tanggal', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1000);
+        .in('akun_kas_id', koperasiAccountIds);
       
-      // Apply account filter if selected
-      if (selectedAccountFilter) {
-        queryKoperasi = queryKoperasi.eq('akun_kas_id', selectedAccountFilter);
-      }
-
-      // Also get transactions from keuangan table with source_module = 'koperasi'
-      // This includes setor cash and other koperasi transactions
       let queryKeuangan = supabase
         .from('keuangan')
         .select(`
@@ -1577,11 +1589,31 @@ const KeuanganUnifiedPage: React.FC = () => {
           akun_kas:akun_kas_id(nama, managed_by)
         `)
         .eq('source_module', 'koperasi')
-        .in('akun_kas_id', koperasiAccountIds)
-        .gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0])
+        .in('akun_kas_id', koperasiAccountIds);
+      
+      // Only apply date limit if NOT 'all' filter (to improve performance)
+      // For 'all', we'll fetch all data but may need to increase limit
+      if (dateFilter !== 'all') {
+        const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+        queryKoperasi = queryKoperasi.gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0]);
+        queryKeuangan = queryKeuangan.gte('tanggal', twelveMonthsAgo.toISOString().split('T')[0]);
+      }
+      
+      queryKoperasi = queryKoperasi
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
-        .limit(1000);
+        .limit(dateFilter === 'all' ? 5000 : 1000); // Higher limit for 'all' filter
+      
+      queryKeuangan = queryKeuangan
+        .order('tanggal', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(dateFilter === 'all' ? 5000 : 1000); // Higher limit for 'all' filter
+      
+      // Apply account filter if selected
+      if (selectedAccountFilter) {
+        queryKoperasi = queryKoperasi.eq('akun_kas_id', selectedAccountFilter);
+        queryKeuangan = queryKeuangan.eq('akun_kas_id', selectedAccountFilter);
+      }
       
       // Apply account filter if selected
       if (selectedAccountFilter) {
@@ -2095,50 +2127,25 @@ const KeuanganUnifiedPage: React.FC = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="all">Semua Waktu</SelectItem>
                 <SelectItem value="bulan-ini">Bulan Ini</SelectItem>
-                <SelectItem value="all">Semua</SelectItem>
               </SelectContent>
             </Select>
             {dateFilter !== 'all' && (
-              <>
-                <Select 
-                  value={selectedMonth.toString()} 
-                  onValueChange={(value) => setSelectedMonth(parseInt(value))}
-                >
-                  <SelectTrigger className="w-[150px] h-9 bg-white border-gray-200">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(month => (
-                      <SelectItem key={month} value={month.toString()}>
-                        {format(new Date(2024, month - 1, 1), 'MMMM', { locale: localeId })}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select 
-                  value={selectedYear.toString()} 
-                  onValueChange={(value) => setSelectedYear(parseInt(value))}
-                >
-                  <SelectTrigger className="w-[100px] h-9 bg-white border-gray-200">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(year => (
-                      <SelectItem key={year} value={year.toString()}>
-                        {year}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </>
+              <MonthYearFilter
+                selectedMonth={selectedMonth}
+                selectedYear={selectedYear}
+                onMonthChange={setSelectedMonth}
+                onYearChange={setSelectedYear}
+                size="md"
+              />
             )}
           </div>
           <div className="text-sm text-gray-600 font-medium px-2 py-1 bg-white/80 rounded-md border border-gray-200/60">
             {(() => {
               const { startDate, endDate } = getDateRange();
               if (dateFilter === 'all') {
-                return 'Semua Data';
+                return 'Semua Data (Tidak Ada Filter Tanggal)';
               }
               return `${format(startDate, 'd MMM yyyy', { locale: localeId })} - ${format(endDate, 'd MMM yyyy', { locale: localeId })}`;
             })()}
@@ -2197,8 +2204,7 @@ const KeuanganUnifiedPage: React.FC = () => {
       {/* Section 3: Charts Section */}
       <ChartsSection 
         monthlyData={monthlyData}
-        categoryDataPemasukan={categoryDataPemasukan}
-        categoryDataPengeluaran={categoryDataPengeluaran}
+        categoryData={categoryDataPengeluaran}
         selectedAccountId={selectedAccountFilter}
         selectedAccountName={selectedAccountName}
       />

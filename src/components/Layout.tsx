@@ -190,37 +190,37 @@ const SidebarContent = () => {
   // Sidebar khusus untuk SANTRI (fokus ke profil sendiri)
   const isSantri = user?.role === 'santri';
   const santriProfileBase = useMemo(() => 
-    `/santri/profile?santriId=${user?.santriId || ''}&santriName=${encodeURIComponent(user?.name || 'Santri')}`,
-    [user?.santriId, user?.name]
+    `/santri/profile/${user?.santriId || ''}`,
+    [user?.santriId]
   );
   const santriMenuSections: MenuSection[] = useMemo(() => [
     {
       title: 'PROFIL',
       icon: UserIcon,
       items: [
-        { icon: UserIcon, label: 'Ringkasan', path: santriProfileBase },
-        { icon: BookOpen, label: 'Akademik', path: `${santriProfileBase}&tab=academic` }
+        { icon: UserIcon, label: 'Ringkasan', path: `${santriProfileBase}/ringkasan` },
+        { icon: BookOpen, label: 'Akademik', path: `${santriProfileBase}/akademik` }
       ]
     },
     {
       title: 'TABUNGAN',
       icon: DollarSign,
       items: [
-        { icon: DollarSign, label: 'Saldo & Riwayat', path: `/tabungan?santriId=${user?.santriId || ''}` }
+        { icon: DollarSign, label: 'Saldo & Riwayat', path: `${santriProfileBase}/tabungan` }
       ]
     },
     {
       title: 'DOKUMEN',
       icon: FileText,
       items: [
-        { icon: FileText, label: 'Wajib & Optional', path: `${santriProfileBase}&tab=documents` }
+        { icon: FileText, label: 'Wajib & Optional', path: `${santriProfileBase}/dokumen` }
       ]
     },
     {
       title: 'BANTUAN',
       icon: HandCoins,
       items: [
-        { icon: HandCoins, label: 'Ringkasan Bantuan', path: `${santriProfileBase}&tab=bantuan` }
+        { icon: HandCoins, label: 'Ringkasan Bantuan', path: `${santriProfileBase}/layanan` }
       ]
     },
     {
@@ -230,7 +230,7 @@ const SidebarContent = () => {
         { icon: Key, label: 'Ubah Password', path: '/change-password' }
       ]
     }
-  ], [santriProfileBase, user?.santriId]);
+  ], [santriProfileBase]);
 
   // Filter menu sections and items based on user role
   // Memoize filter function to prevent recreation
@@ -562,8 +562,7 @@ const Layout = ({ children }: LayoutProps) => {
     
     // If user is santri and on dashboard (/), redirect to their profile
     if (authUser.role === 'santri' && authUser.santriId && location.pathname === '/') {
-      const santriName = encodeURIComponent(authUser.name || 'Santri');
-      navigate(`/santri/profile?santriId=${authUser.santriId}&santriName=${santriName}`, { replace: true });
+      navigate(`/santri/profile/${authUser.santriId}/ringkasan`, { replace: true });
       return;
     }
   }, [authUser, location.pathname, authLoading, navigate]);

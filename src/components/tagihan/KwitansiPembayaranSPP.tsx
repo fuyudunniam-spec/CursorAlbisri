@@ -145,8 +145,8 @@ const KwitansiPembayaranSPP: React.FC<KwitansiPembayaranSPPProps> = ({ pembayara
 
               <div className="grid grid-cols-2 gap-4 print:gap-2">
                 <div>
-                  <p className="text-sm font-semibold print:text-xs">NISN</p>
-                  <p className="text-sm print:text-xs">{pembayaran.santri?.nisn || '-'}</p>
+                  <p className="text-sm font-semibold print:text-xs">ID Santri</p>
+                  <p className="text-sm print:text-xs">{pembayaran.santri?.id_santri || '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm font-semibold print:text-xs">Kategori</p>

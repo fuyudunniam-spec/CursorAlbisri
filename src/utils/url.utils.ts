@@ -27,6 +27,7 @@ export const isDataUrl = (url: string | null | undefined): boolean => {
 
 /**
  * Get safe avatar URL for display
+ * Handles both full URLs and relative paths from Supabase storage
  */
 export const getSafeAvatarUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -34,6 +35,14 @@ export const getSafeAvatarUrl = (url: string | null | undefined): string => {
   // Allow data URLs (base64 encoded images) and regular URLs
   if (isDataUrl(url) || (url.startsWith('http') && !url.startsWith('blob:'))) {
     return url;
+  }
+  
+  // Handle relative paths from Supabase storage
+  // Path format: "santri/{santriId}/photos/{filename}" or "{santriId}/{filename}"
+  if (url.includes('/') && !url.startsWith('http')) {
+    // This is a relative path, will be handled by component that has access to supabase
+    // Return empty string here, component should generate public URL
+    return '';
   }
   
   return '';

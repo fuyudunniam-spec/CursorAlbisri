@@ -112,6 +112,12 @@ export const getBantuanSantri = async (
   bulan: number, 
   tahun: number
 ): Promise<BantuanSantri | null> => {
+  // Validate required parameters
+  if (!santriId || !bulan || !tahun) {
+    console.error('getBantuanSantri: Missing required parameters', { santriId, bulan, tahun });
+    return null;
+  }
+  
   try {
     const { data, error } = await supabase.rpc('get_bantuan_santri', {
       p_santri_id: santriId,

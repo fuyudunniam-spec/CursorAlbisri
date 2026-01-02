@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,7 +73,7 @@ const PenjualanPage = () => {
   });
   
   // Filter states
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'last-month' | 'year' | 'last-year'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'pending'>('all');
   const [formData, setFormData] = useState({
     item: '',
@@ -171,9 +171,9 @@ const PenjualanPage = () => {
   });
 
   const { data: salesData, isLoading: salesLoading, refetch: refetchSales } = useQuery({
-    queryKey: ['sales-transactions', searchTerm],
+    queryKey: ['sales-transactions', searchTerm, dateFilter],
     queryFn: () => getCombinedSalesHistory(
-      { page: 1, pageSize: 50 },
+      { page: 1, pageSize: 500 }, // Increased to 500 to show more history
       { 
         search: searchTerm || null
       }
@@ -191,6 +191,22 @@ const PenjualanPage = () => {
   const isLoading = inventoryLoading || salesLoading || statsLoading;
   const items = inventoryData?.data || [];
   const sales = salesData?.data || [];
+  
+  // Debug: Log sales data to verify it's loaded
+  useEffect(() => {
+    if (sales && sales.length > 0) {
+      console.log('[PenjualanPage] Sales loaded:', {
+        total: sales.length,
+        dateFilter,
+        sampleDates: sales.slice(0, 5).map(s => s.tanggal)
+      });
+    } else if (!salesLoading && salesData) {
+      console.log('[PenjualanPage] No sales data found:', {
+        dateFilter,
+        salesDataTotal: salesData?.total
+      });
+    }
+  }, [sales, dateFilter, salesLoading, salesData]);
 
   const handleMultiItemSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -861,10 +877,31 @@ const PenjualanPage = () => {
   
   // Enhanced filtering with date and status
   const getFilteredSales = () => {
-    let filtered = sales;
+    if (!sales || sales.length === 0) {
+      return [];
+    }
     
-    // Date filter
-    if (dateFilter === 'today') {
+    let filtered = [...sales]; // Create copy to avoid mutation
+    
+    // IMPORTANT: If filter is 'all', only apply search filter, no date filtering
+    // This ensures all data is shown when filter is 'all'
+    
+    // Search filter (applies to all filter types)
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(sale => {
+        const pembeliMatch = sale.pembeli?.toLowerCase().includes(searchLower);
+        const itemMatch = sale.itemName?.toLowerCase().includes(searchLower);
+        const tanggalMatch = sale.tanggal?.includes(searchLower);
+        return pembeliMatch || itemMatch || tanggalMatch;
+      });
+    }
+    
+    // Date filter (only apply if NOT 'all')
+    if (dateFilter === 'all') {
+      // No date filtering - show all data
+      return filtered;
+    } else if (dateFilter === 'today') {
       filtered = filtered.filter(sale => sale.tanggal === today);
     } else if (dateFilter === 'week') {
       const weekAgo = new Date();
@@ -872,13 +909,49 @@ const PenjualanPage = () => {
       const weekAgoStr = weekAgo.toISOString().split('T')[0];
       filtered = filtered.filter(sale => sale.tanggal >= weekAgoStr);
     } else if (dateFilter === 'month') {
-      const thisMonth = new Date().getMonth();
-      const thisYear = new Date().getFullYear();
+      const now = new Date();
+      const thisMonth = now.getMonth();
+      const thisYear = now.getFullYear();
       filtered = filtered.filter(sale => {
+        if (!sale.tanggal) return false;
         const saleDate = new Date(sale.tanggal);
         return saleDate.getMonth() === thisMonth && saleDate.getFullYear() === thisYear;
       });
+    } else if (dateFilter === 'last-month') {
+      const now = new Date();
+      const lastMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+      const lastMonthYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      filtered = filtered.filter(sale => {
+        if (!sale.tanggal) return false;
+        const saleDate = new Date(sale.tanggal);
+        return saleDate.getMonth() === lastMonth && saleDate.getFullYear() === lastMonthYear;
+      });
+    } else if (dateFilter === 'year') {
+      const now = new Date();
+      const thisYear = now.getFullYear();
+      filtered = filtered.filter(sale => {
+        if (!sale.tanggal) return false;
+        const saleDate = new Date(sale.tanggal);
+        return saleDate.getFullYear() === thisYear;
+      });
+    } else if (dateFilter === 'last-year') {
+      const now = new Date();
+      const lastYear = now.getFullYear() - 1;
+      filtered = filtered.filter(sale => {
+        if (!sale.tanggal) return false;
+        const saleDate = new Date(sale.tanggal);
+        return saleDate.getFullYear() === lastYear;
+      });
     }
+    
+    // Status filter (if needed in the future)
+    // Currently all sales are considered 'success' based on the UI
+    // if (statusFilter !== 'all') {
+    //   filtered = filtered.filter(sale => {
+    //     // Add status logic here when status field is available
+    //     return true;
+    //   });
+    // }
     
     return filtered;
   };
@@ -896,6 +969,9 @@ const PenjualanPage = () => {
         case 'today': return 'Hari Ini';
         case 'week': return '7 Hari Terakhir';
         case 'month': return 'Bulan Ini';
+        case 'last-month': return 'Bulan Lalu';
+        case 'year': return 'Tahun Ini';
+        case 'last-year': return 'Tahun Lalu';
         default: return 'Semua Waktu';
       }
     };
@@ -1386,7 +1462,20 @@ const PenjualanPage = () => {
       {/* Sales List */}
       <Card>
         <CardHeader>
-          <CardTitle>Riwayat Penjualan</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Riwayat Penjualan</CardTitle>
+            {filteredSales && filteredSales.length > 0 && (
+              <div className="text-sm text-muted-foreground">
+                Menampilkan {filteredSales.length} dari {sales?.length || 0} transaksi
+                {dateFilter !== 'all' && ` (Filter: ${dateFilter === 'today' ? 'Hari Ini' : 
+                  dateFilter === 'week' ? '7 Hari Terakhir' :
+                  dateFilter === 'month' ? 'Bulan Ini' :
+                  dateFilter === 'last-month' ? 'Bulan Lalu' :
+                  dateFilter === 'year' ? 'Tahun Ini' :
+                  dateFilter === 'last-year' ? 'Tahun Lalu' : ''})`}
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="flex gap-4 mb-4">
@@ -1406,7 +1495,10 @@ const PenjualanPage = () => {
             
             <div className="w-48">
               <Label htmlFor="dateFilter">Filter Tanggal</Label>
-              <Select value={dateFilter} onValueChange={(value: any) => setDateFilter(value)}>
+              <Select value={dateFilter} onValueChange={(value: any) => {
+                console.log('[PenjualanPage] Filter changed:', value);
+                setDateFilter(value);
+              }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Pilih periode" />
                 </SelectTrigger>
@@ -1415,8 +1507,21 @@ const PenjualanPage = () => {
                   <SelectItem value="today">Hari Ini</SelectItem>
                   <SelectItem value="week">7 Hari Terakhir</SelectItem>
                   <SelectItem value="month">Bulan Ini</SelectItem>
+                  <SelectItem value="last-month">Bulan Lalu</SelectItem>
+                  <SelectItem value="year">Tahun Ini</SelectItem>
+                  <SelectItem value="last-year">Tahun Lalu</SelectItem>
                 </SelectContent>
               </Select>
+              {dateFilter !== 'all' && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Menampilkan: {dateFilter === 'today' ? 'Hari Ini' : 
+                                dateFilter === 'week' ? '7 Hari Terakhir' :
+                                dateFilter === 'month' ? 'Bulan Ini' :
+                                dateFilter === 'last-month' ? 'Bulan Lalu' :
+                                dateFilter === 'year' ? 'Tahun Ini' :
+                                dateFilter === 'last-year' ? 'Tahun Lalu' : ''}
+                </p>
+              )}
             </div>
             
             <div className="w-48">
@@ -1451,7 +1556,7 @@ const PenjualanPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSales.map((sale) => {
+                  {filteredSales && filteredSales.length > 0 ? filteredSales.map((sale) => {
                     const isMultiItem = sale.type === 'multi';
                     const singleItemData = !isMultiItem && 'jumlah' in sale.originalData ? sale.originalData : null;
                     
@@ -1536,18 +1641,28 @@ const PenjualanPage = () => {
                         </td>
                       </tr>
                     );
-                  })}
+                  }) : (
+                    <tr>
+                      <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                        <ShoppingCart className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p>Tidak ada penjualan yang ditemukan</p>
+                        {sales && sales.length > 0 && (
+                          <p className="text-xs mt-2 text-gray-500">
+                            Coba ubah filter tanggal atau kata kunci pencarian
+                          </p>
+                        )}
+                        {(!sales || sales.length === 0) && (
+                          <p className="text-xs mt-2 text-gray-500">
+                            Belum ada data penjualan
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
-
-          {filteredSales.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <ShoppingCart className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Tidak ada penjualan yang ditemukan</p>
-            </div>
-          )}
         </CardContent>
       </Card>
 

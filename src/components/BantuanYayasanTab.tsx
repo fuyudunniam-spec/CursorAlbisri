@@ -36,7 +36,15 @@ interface BantuanYayasanTabProps {
   santriIdSantri?: string;
 }
 
-const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
+const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId, santriName, santriNisn, santriIdSantri }) => {
+  // Early return if santriId is missing
+  if (!santriId) {
+    return (
+      <div className="p-4 text-center text-gray-500">
+        ID Santri tidak ditemukan. Pastikan parameter URL sudah benar.
+      </div>
+    );
+  }
   const [bulan, setBulan] = useState(new Date().getMonth() + 1);
   const [tahun, setTahun] = useState(new Date().getFullYear());
   const [bantuan, setBantuan] = useState<BantuanSantri | null>(null);
@@ -53,6 +61,7 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
   const bulanNames = getBulanNames();
 
   useEffect(() => {
+    if (!santriId) return;
     loadBantuan();
     loadHistory();
     loadAllTimeSummary();
@@ -60,6 +69,7 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
   }, [santriId, bulan, tahun]);
 
   const loadBantuan = async () => {
+    if (!santriId) return;
     setIsLoading(true);
     try {
       const data = await getBantuanSantri(santriId, bulan, tahun);
@@ -73,6 +83,7 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
   };
 
   const loadHistory = async () => {
+    if (!santriId) return;
     try {
       // Load last 6 months of data
       const promises = [];
@@ -92,6 +103,7 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
   };
 
   const loadAllTimeSummary = async () => {
+    if (!santriId) return;
     try {
       // Query all alokasi_pengeluaran_santri (langsung)
       const { data: langsungData } = await supabase
@@ -130,15 +142,30 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
   };
 
   const loadRecentActivity = async () => {
+    if (!santriId) return;
     try {
       const { data } = await supabase
         .from('alokasi_pengeluaran_santri')
-        .select('created_at, nominal_alokasi, jenis_bantuan')
+        .select('id, created_at, nominal_alokasi, jenis_bantuan, sub_kategori, keterangan')
         .eq('santri_id', santriId)
         .order('created_at', { ascending: false })
         .limit(3);
       
-      setRecentActivity(data || []);
+      // Map to match the expected structure for display
+      const mappedData = (data || []).map(item => ({
+        id: item.id || '',
+        jumlah: item.nominal_alokasi || 0,
+        deskripsi: item.jenis_bantuan || 'Bantuan',
+        tanggal: item.created_at || new Date().toISOString(),
+        kategori: item.sub_kategori || 'Lainnya',
+        // Additional fields for display (if needed)
+        nominal_alokasi: item.nominal_alokasi,
+        jenis_bantuan: item.jenis_bantuan,
+        sub_kategori: item.sub_kategori,
+        keterangan: item.keterangan
+      }));
+      
+      setRecentActivity(mappedData);
     } catch (error) {
       console.error('Error loading recent activity:', error);
     }
@@ -162,7 +189,7 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
     }
   };
 
-  const totalLangsung = bantuan?.langsung?.reduce((sum, x) => sum + (x.nominal_alokasi || 0), 0) || 0;
+  const totalLangsung = bantuan?.langsung?.reduce((sum, x) => sum + (x.jumlah || 0), 0) || 0;
   const totalOverhead = (bantuan?.overhead?.spp_pendidikan || 0) + (bantuan?.overhead?.asrama_kebutuhan || 0);
   const totalBantuan = totalLangsung + totalOverhead;
 
@@ -317,19 +344,13 @@ const BantuanYayasanTab: React.FC<BantuanYayasanTabProps> = ({ santriId }) => {
                 {bantuan.langsung.map(item => (
                   <div key={item.id} className="flex justify-between items-center p-3 border rounded-lg">
                     <div>
-                      <div className="font-medium">{item.jenis_bantuan || item.deskripsi}</div>
+                      <div className="font-medium">{item.deskripsi}</div>
                       <div className="text-sm text-muted-foreground">
                         {formatDate(item.tanggal)} • {item.kategori}
-                        {item.sub_kategori && ` • ${item.sub_kategori}`}
                       </div>
-                      {item.keterangan && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {item.keterangan}
-                        </div>
-                      )}
                     </div>
                     <div className="font-bold text-green-600">
-                      {formatRupiah(item.nominal_alokasi || item.jumlah)}
+                      {formatRupiah(item.jumlah)}
                     </div>
                   </div>
                 ))}

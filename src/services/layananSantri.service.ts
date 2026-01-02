@@ -1060,7 +1060,7 @@ export class LayananSantriService {
       // Get ALL santri binaan mukim aktif pada akhir periode
       const { data: allSantri, error: santriError } = await supabase
         .from('santri')
-        .select('id, nama_lengkap, nisn, kategori')
+        .select('id, nama_lengkap, id_santri, kategori')
         .eq('status', 'Aktif')
         .or('kategori.ilike.%Binaan Mukim%,kategori.ilike.%Mukim Binaan%')
         .lte('created_at', endDate.toISOString())

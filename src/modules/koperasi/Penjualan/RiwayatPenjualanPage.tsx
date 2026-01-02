@@ -57,7 +57,7 @@ import { useAuth } from '@/hooks/useAuth';
 const PAGE_SIZE = 20;
 const MAX_PAGINATION_BUTTONS = 5;
 
-type DateFilterType = 'all' | 'today' | 'week' | 'month' | 'year';
+type DateFilterType = 'all' | 'today' | 'week' | 'month' | 'year' | 'last-year';
 type PaymentMethod = 'cash' | 'transfer';
 type OwnerType = 'yayasan' | 'koperasi';
 
@@ -174,7 +174,7 @@ function RiwayatPenjualanPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateFilter, setDateFilter] = useState<DateFilterType>('year');
+  const [dateFilter, setDateFilter] = useState<DateFilterType>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'lunas' | 'hutang' | 'cicilan'>('all');
   const [page, setPage] = useState(1);
   const [viewingPenjualan, setViewingPenjualan] = useState<PenjualanListItem | null>(null);
@@ -224,12 +224,33 @@ function RiwayatPenjualanPage() {
           start: startOfYear(now),
           end: endOfYear(now),
         };
-      default:
+      case 'last-year': {
+        const lastYear = now.getFullYear() - 1;
+        const lastYearStart = startOfYear(new Date(lastYear, 0, 1));
+        const lastYearEnd = endOfYear(new Date(lastYear, 11, 31));
         return {
-          startDate: format(startOfYear(now), 'yyyy-MM-dd'),
-          endDate: format(endOfYear(now), 'yyyy-MM-dd'),
-          start: startOfYear(now),
-          end: endOfYear(now),
+          startDate: format(lastYearStart, 'yyyy-MM-dd'),
+          endDate: format(lastYearEnd, 'yyyy-MM-dd'),
+          start: lastYearStart,
+          end: lastYearEnd,
+        };
+      }
+      case 'all':
+        // Untuk 'all', return range yang sangat luas untuk mengambil semua data
+        // Menggunakan tanggal sangat lama hingga hari ini
+        return {
+          startDate: '1970-01-01', // Very old date to fetch all records
+          endDate: format(endOfDay(now), 'yyyy-MM-dd'), // Today
+          start: new Date(0), // Epoch start
+          end: endOfDay(now), // Today end of day
+        };
+      default:
+        // Default to 'all' behavior - tampilkan semua data
+        return {
+          startDate: '1970-01-01', // Very old date to fetch all records
+          endDate: format(endOfDay(now), 'yyyy-MM-dd'), // Today
+          start: new Date(0), // Epoch start
+          end: endOfDay(now), // Today end of day
         };
     }
   };
@@ -284,9 +305,11 @@ function RiwayatPenjualanPage() {
       
       baseQuery = baseQuery.order('tanggal', { ascending: false });
 
-      // Apply date filter
-      baseQuery = baseQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
-      baseQuery = baseQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      // Apply date filter (skip if 'all')
+      if (dateFilter !== 'all') {
+        baseQuery = baseQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
+        baseQuery = baseQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      }
 
       // Apply search filter
       if (searchTerm) {
@@ -378,9 +401,11 @@ function RiwayatPenjualanPage() {
         `, { count: 'exact' })
         .in('status_pembayaran', ['lunas', 'hutang', 'cicilan']);
 
-      // Apply date filter
-      statsQuery = statsQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
-      statsQuery = statsQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      // Apply date filter (skip if 'all')
+      if (dateFilter !== 'all') {
+        statsQuery = statsQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
+        statsQuery = statsQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      }
 
       // Apply search filter
       if (searchTerm) {
@@ -464,12 +489,18 @@ function RiwayatPenjualanPage() {
   const { data: hutangSummary, isLoading: isLoadingHutang } = useQuery({
     queryKey: ['koperasi-penjualan-hutang-summary', dateRange],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let hutangQuery = supabase
         .from('kop_penjualan')
         .select('id, total_transaksi, total_bayar, sisa_hutang, jumlah_hutang, status_pembayaran')
-        .in('status_pembayaran', ['hutang', 'cicilan'])
-        .gte('tanggal', dateRange.startDate + 'T00:00:00')
-        .lte('tanggal', dateRange.endDate + 'T23:59:59');
+        .in('status_pembayaran', ['hutang', 'cicilan']);
+      
+      // Apply date filter (skip if 'all')
+      if (dateFilter !== 'all') {
+        hutangQuery = hutangQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
+        hutangQuery = hutangQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      }
+      
+      const { data, error } = await hutangQuery;
 
       if (error) throw error;
 
@@ -496,8 +527,7 @@ function RiwayatPenjualanPage() {
   const { data: chartData, isLoading: isLoadingChart } = useQuery({
     queryKey: ['koperasi-penjualan-chart', dateRange],
     queryFn: async () => {
-
-      const { data, error } = await supabase
+      let chartQuery = supabase
         .from('kop_penjualan')
         .select(`
           tanggal,
@@ -511,10 +541,15 @@ function RiwayatPenjualanPage() {
             )
           )
         `)
-        .in('status_pembayaran', ['lunas', 'hutang', 'cicilan'])
-        .gte('tanggal', dateRange.startDate + 'T00:00:00')
-        .lte('tanggal', dateRange.endDate + 'T23:59:59')
-        .order('tanggal', { ascending: true });
+        .in('status_pembayaran', ['lunas', 'hutang', 'cicilan']);
+      
+      // Apply date filter (skip if 'all')
+      if (dateFilter !== 'all') {
+        chartQuery = chartQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
+        chartQuery = chartQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      }
+      
+      const { data, error } = await chartQuery.order('tanggal', { ascending: true });
 
       if (error) throw error;
 
@@ -903,13 +938,19 @@ function RiwayatPenjualanPage() {
     queryKey: ['cash-belum-disetor', dateRange],
     queryFn: async () => {
       // Get total penjualan cash untuk periode yang dipilih
-      const { data: penjualanCash } = await supabase
+      let cashQuery = supabase
         .from('kop_penjualan')
         .select('id, total_transaksi, tanggal')
         .eq('metode_pembayaran', 'cash')
-        .in('status_pembayaran', ['lunas', 'hutang', 'cicilan'])
-        .gte('tanggal', dateRange.startDate + 'T00:00:00')
-        .lte('tanggal', dateRange.endDate + 'T23:59:59');
+        .in('status_pembayaran', ['lunas', 'hutang', 'cicilan']);
+      
+      // Apply date filter (skip if 'all')
+      if (dateFilter !== 'all') {
+        cashQuery = cashQuery.gte('tanggal', dateRange.startDate + 'T00:00:00');
+        cashQuery = cashQuery.lte('tanggal', dateRange.endDate + 'T23:59:59');
+      }
+      
+      const { data: penjualanCash } = await cashQuery;
 
       if (!penjualanCash || penjualanCash.length === 0) {
         return {
@@ -1019,6 +1060,7 @@ function RiwayatPenjualanPage() {
               <SelectItem value="week">7 Hari Terakhir</SelectItem>
               <SelectItem value="month">Bulan Ini</SelectItem>
               <SelectItem value="year">Tahun Ini</SelectItem>
+              <SelectItem value="last-year">Tahun Lalu</SelectItem>
               <SelectItem value="all">Semua Waktu</SelectItem>
             </SelectContent>
           </Select>

@@ -412,7 +412,7 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
           try {
             const { data: santriData } = await supabase
               .from('santri')
-              .select('nama_lengkap, id_santri, nisn')
+              .select('nama_lengkap, id_santri')
               .eq('id', alloc.santri_id)
               .single();
             
@@ -904,7 +904,7 @@ const TransactionEditModal: React.FC<TransactionEditModalProps> = ({
                                   </TableCell>
                                   <TableCell>
                                     <Badge variant="outline" className="font-mono text-xs">
-                                      {alloc.santri?.id_santri || alloc.santri?.nisn || '-'}
+                                      {alloc.santri?.id_santri || '-'}
                                     </Badge>
                                   </TableCell>
                                   <TableCell>

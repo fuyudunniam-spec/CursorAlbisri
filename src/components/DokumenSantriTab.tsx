@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { 
   FileText, 
   Upload, 
@@ -18,16 +20,50 @@ import {
   Clock,
   AlertCircle,
   Download,
-  Plus,
-  X,
-  Image,
-  Trash2
+  Trash2,
+  Loader2
 } from "lucide-react";
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { DocumentService, DocumentRequirement, DocumentFile } from '@/services/document.service';
-import { DokumenHelper } from '@/utils/dokumen.helper';
-import { ProfileHelper } from '@/utils/profile.helper';
+import { DocumentService } from '@/services/document.service';
+
+// Constants
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const UPLOAD_TIMEOUT = 120000; // 2 minutes
+const SIGNED_URL_EXPIRY = 3600; // 1 hour
+const STORAGE_BUCKET = 'santri-documents';
+const RELOAD_DELAY = 500; // ms
+
+const ALLOWED_FILE_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+] as const;
+
+const EXCLUDED_DOCUMENTS = [
+  'Surat Permohonan Bantuan',
+  'Surat Keterangan Sehat',
+  'KTP Orang Tua',
+  'Akta Kematian Orang Tua',
+  'Surat Permohonan',
+  'Surat Keterangan Penghasilan',
+  'Surat Keterangan Tidak Mampu',
+  'Sertifikat Prestasi',
+  'Raport',
+  'Slip Gaji Orang Tua',
+  'Surat Keterangan',
+  'Dokumen Lainnya'
+] as const;
+
+const DEFAULT_DOCUMENTS = [
+  { jenis_dokumen: 'Pas Foto', label: 'Pas Foto', required: true },
+  { jenis_dokumen: 'Kartu Keluarga', label: 'Kartu Keluarga', required: true }
+] as const;
+
+type VerificationStatus = 'Diverifikasi' | 'Belum Diverifikasi' | 'Ditolak';
 
 interface DokumenSantriTabProps {
   santriId: string;
@@ -46,7 +82,7 @@ interface DokumenItem {
   label: string;
   required: boolean;
   uploaded: boolean;
-  status_verifikasi?: string;
+  status_verifikasi?: VerificationStatus;
   path_file?: string;
   nama_file?: string;
   created_at?: string;
@@ -66,10 +102,15 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
   const [previewFile, setPreviewFile] = useState<DokumenItem | null>(null);
   const [verificationDialog, setVerificationDialog] = useState<DokumenItem | null>(null);
   const [verificationNote, setVerificationNote] = useState('');
-  const [verificationStatus, setVerificationStatus] = useState<'Diverifikasi' | 'Belum Diverifikasi' | 'Ditolak'>('Diverifikasi');
+  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('Diverifikasi');
+  
+  // Hide verification features for santri (mode=view)
+  const isAdminMode = mode !== 'view';
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     loadDokumen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [santriId, santriData?.status_sosial, santriData?.kategori, isBantuanRecipient]);
 
   // Normalize incoming document names to align with DB enum dokumen_santri_jenis_dokumen_check
@@ -114,42 +155,14 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         isBantuan
       );
       
-      console.log('📋 DocumentService.getDocumentRequirements result:', {
-        kategori,
-        statusSosial,
-        isBantuan,
-        requiredDocuments,
-        count: requiredDocuments?.length || 0
-      });
-      
       // Jika tidak ada dokumen yang diperlukan, berikan default minimal
       if (!requiredDocuments || requiredDocuments.length === 0) {
-        console.log('⚠️ No required documents found, using default');
         return {
-          minimal: [
-            { jenis_dokumen: 'Pas Foto', label: 'Pas Foto', required: true },
-            { jenis_dokumen: 'Kartu Keluarga', label: 'Kartu Keluarga', required: true }
-          ],
+          minimal: DEFAULT_DOCUMENTS.map(doc => ({ ...doc })),
           khusus: [],
           pelengkap: []
         };
       }
-      
-      // List of documents to exclude (redundant or not needed)
-      const excludedDocuments = [
-        'Surat Permohonan Bantuan',
-        'Surat Keterangan Sehat',
-        'KTP Orang Tua',
-        'Akta Kematian Orang Tua',
-        'Surat Permohonan',
-        'Surat Keterangan Penghasilan',
-        'Surat Keterangan Tidak Mampu',
-        'Sertifikat Prestasi',
-        'Raport',
-        'Slip Gaji Orang Tua',
-        'Surat Keterangan',
-        'Dokumen Lainnya'
-      ];
 
       // Konversi ke format yang diharapkan oleh komponen (filter legacy/blocked, normalize names)
       // Deduplicate berdasarkan jenis_dokumen (keep first occurrence)
@@ -159,14 +172,12 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
           const mappedJenis = normalizeJenisDokumen(doc.jenis_dokumen);
           
           // Exclude blocked/redundant documents
-          if (excludedDocuments.includes(mappedJenis)) {
-            console.log('⚠️ [DokumenSantriTab] Excluding document:', mappedJenis);
+          if (EXCLUDED_DOCUMENTS.includes(mappedJenis as typeof EXCLUDED_DOCUMENTS[number])) {
             return null;
           }
           
           // Skip if already seen (deduplicate)
           if (seenJenis.has(mappedJenis)) {
-            console.log('⚠️ [DokumenSantriTab] Skipping duplicate:', mappedJenis);
             return null;
           }
           
@@ -190,13 +201,9 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         pelengkap
       };
     } catch (error) {
-      console.error('❌ Error in getDokumenRequirements:', error);
-      // Return default minimal requirements
+      // Return default minimal requirements on error
       return {
-        minimal: [
-          { jenis_dokumen: 'Pas Foto', label: 'Pas Foto', required: true },
-          { jenis_dokumen: 'Kartu Keluarga', label: 'Kartu Keluarga', required: true }
-        ],
+        minimal: DEFAULT_DOCUMENTS.map(doc => ({ ...doc })),
         khusus: [],
         pelengkap: []
       };
@@ -226,7 +233,6 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
 
       // Check if requirements is valid
       if (!requirements) {
-        console.warn('Requirements is null/undefined, skipping dokumen merge');
         setDokumenList([]);
         return;
       }
@@ -243,11 +249,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
           const uploadedJenis = normalizeJenisDokumen(d.jenis_dokumen);
           return uploadedJenis === req.jenis_dokumen;
         });
-        console.log('🔍 Matching dokumen:', {
-          required: req.jenis_dokumen,
-          uploaded: uploaded?.jenis_dokumen,
-          found: !!uploaded
-        });
+        
         return {
           ...req,
           id: uploaded?.id,
@@ -263,40 +265,38 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
 
       setDokumenList(mergedDocs);
     } catch (error) {
-      console.error('Error loading dokumen:', error);
-      toast.error('Gagal memuat dokumen');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memuat dokumen';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusIcon = (status?: string) => {
+  const getStatusIcon = useCallback((status?: VerificationStatus) => {
     switch (status) {
       case 'Diverifikasi':
         return <CheckCircle className="w-4 h-4 text-green-600" />;
       case 'Ditolak':
         return <XCircle className="w-4 h-4 text-red-600" />;
       case 'Belum Diverifikasi':
-      case 'Menunggu Verifikasi':
         return <Clock className="w-4 h-4 text-amber-600" />;
       default:
         return <AlertCircle className="w-4 h-4 text-gray-400" />;
     }
-  };
+  }, []);
 
-  const getStatusBadge = (status?: string) => {
+  const getStatusBadge = useCallback((status?: VerificationStatus) => {
     switch (status) {
       case 'Diverifikasi':
         return <Badge className="bg-green-600">✓ Diverifikasi</Badge>;
       case 'Ditolak':
         return <Badge variant="destructive">✗ Ditolak</Badge>;
       case 'Belum Diverifikasi':
-      case 'Menunggu Verifikasi':
         return <Badge variant="secondary">⏳ Menunggu</Badge>;
       default:
         return null;
     }
-  };
+  }, []);
 
   const handleFileUpload = async (jenisDokumen: string, file: File) => {
     // Prevent multiple simultaneous uploads
@@ -315,19 +315,10 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         return;
       }
       
-      console.log('🚀 Starting upload:', {
-        jenisDokumen: normalizedJenis,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type,
-        santriId
-      });
-      
       setUploadingFiles(prev => ({ ...prev, [jenisDokumen]: true }));
       
       // Validate file size early
-      const maxSize = 10 * 1024 * 1024; // 10MB
-      if (file.size > maxSize) {
+      if (file.size > MAX_FILE_SIZE) {
         throw new Error('File terlalu besar. Maksimal 10MB.');
       }
 
@@ -336,51 +327,45 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         throw new Error('File kosong. Silakan pilih file yang valid.');
       }
       
-      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-      if (!allowedTypes.includes(file.type)) {
+      if (!ALLOWED_FILE_TYPES.includes(file.type as typeof ALLOWED_FILE_TYPES[number])) {
         throw new Error('Tipe file tidak didukung. Gunakan PDF, JPG, PNG, atau DOC.');
       }
       
-      // ✅ Use consistent path structure: santri/{santriId}/{jenisDokumen}/{timestamp}.{ext}
+      // Use consistent path structure: santri/{santriId}/{jenisDokumen}/{timestamp}.{ext}
       const fileExt = file.name.split('.').pop()?.toLowerCase() || 'pdf';
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `santri/${santriId}/${normalizedJenis}/${fileName}`;
       uploadedFilePath = filePath;
       
-      console.log('📁 Upload path:', filePath);
-      
       // Upload file ke storage with error handling and timeout
       const uploadPromise = supabase.storage
-        .from('santri-documents')
+        .from(STORAGE_BUCKET)
         .upload(filePath, file, {
           cacheControl: '3600',
           upsert: false
         });
 
       // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Upload timeout. File terlalu besar atau koneksi lambat.')), 120000) // 2 minutes
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Upload timeout. File terlalu besar atau koneksi lambat.')), UPLOAD_TIMEOUT)
       );
 
       const { data: uploadData, error: uploadError } = await Promise.race([
         uploadPromise,
         timeoutPromise
-      ]) as any;
+      ]);
 
       if (uploadError) {
-        console.error('❌ Upload error:', uploadError);
         // Clean up if file was partially uploaded
         if (uploadedFilePath) {
           try {
-            await supabase.storage.from('santri-documents').remove([uploadedFilePath]);
-          } catch (cleanupError) {
-            console.warn('Failed to cleanup partial upload:', cleanupError);
+            await supabase.storage.from(STORAGE_BUCKET).remove([uploadedFilePath]);
+          } catch {
+            // Silent cleanup failure
           }
         }
         throw uploadError;
       }
-
-      console.log('✅ Upload successful:', uploadData);
 
       // Insert record ke database
       const insertData = {
@@ -391,47 +376,44 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         ukuran_file: file.size,
         tipe_file: file.type,
         path_file: filePath,
-        status_verifikasi: 'Belum Diverifikasi',
+        status_verifikasi: 'Belum Diverifikasi' as VerificationStatus,
         is_editable_by_santri: true
       };
-      
-      console.log('💾 Inserting to database:', insertData);
       
       const { error: insertError } = await supabase
         .from('dokumen_santri')
         .insert(insertData);
 
       if (insertError) {
-        console.error('❌ Database insert error:', insertError);
         // Clean up uploaded file if database insert fails
         if (uploadedFilePath) {
           try {
-            await supabase.storage.from('santri-documents').remove([uploadedFilePath]);
-          } catch (cleanupError) {
-            console.warn('Failed to cleanup uploaded file:', cleanupError);
+            await supabase.storage.from(STORAGE_BUCKET).remove([uploadedFilePath]);
+          } catch {
+            // Silent cleanup failure
           }
         }
         throw insertError;
       }
 
-      console.log('✅ Database insert successful');
       toast.success('Dokumen berhasil diupload!');
       
       // Reload data after a short delay to ensure consistency
       setTimeout(() => {
         loadDokumen();
-      }, 500);
-    } catch (error: any) {
-      console.error('❌ Upload failed:', error);
-      const errorMessage = error?.message || error?.error_description || 'Unknown error';
+      }, RELOAD_DELAY);
+    } catch (error) {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { error_description?: string })?.error_description || 'Gagal mengupload dokumen';
       toast.error(`Gagal mengupload dokumen: ${errorMessage}`);
       
       // Clean up on error
       if (uploadedFilePath) {
         try {
-          await supabase.storage.from('santri-documents').remove([uploadedFilePath]);
-        } catch (cleanupError) {
-          console.warn('Failed to cleanup on error:', cleanupError);
+          await supabase.storage.from(STORAGE_BUCKET).remove([uploadedFilePath]);
+        } catch {
+          // Silent cleanup failure
         }
       }
     } finally {
@@ -439,18 +421,19 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
     }
   };
 
-  const handleFileDelete = async (dokumenId: string, pathFile: string) => {
+  const handleFileDelete = useCallback(async (dokumenId: string, pathFile: string) => {
+    if (!dokumenId || !pathFile) {
+      toast.error('Data dokumen tidak valid');
+      return;
+    }
+
     try {
       setLoading(true);
       
-      // Delete dari storage with correct bucket name
-      const { error: storageError } = await supabase.storage
-        .from('santri-documents')  // ✅ Fixed: was 'dokumen-santri'
+      // Delete dari storage
+      await supabase.storage
+        .from(STORAGE_BUCKET)
         .remove([pathFile]);
-
-      if (storageError) {
-        console.warn('Storage delete error:', storageError);
-      }
 
       // Delete dari database
       const { error: dbError } = await supabase
@@ -463,20 +446,25 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
       }
 
       toast.success('Dokumen berhasil dihapus!');
-      loadDokumen(); // Reload data
+      loadDokumen();
     } catch (error) {
-      console.error('Error deleting file:', error);
-      toast.error('Gagal menghapus dokumen');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal menghapus dokumen';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [loadDokumen]);
 
-  const handleFileView = async (pathFile: string) => {
+  const handleFileView = useCallback(async (pathFile: string) => {
+    if (!pathFile) {
+      toast.error('Path file tidak valid');
+      return;
+    }
+
     try {
       const { data, error } = await supabase.storage
-        .from('santri-documents')  // ✅ Fixed: was 'dokumen-santri'
-        .createSignedUrl(pathFile, 3600); // 1 hour expiry
+        .from(STORAGE_BUCKET)
+        .createSignedUrl(pathFile, SIGNED_URL_EXPIRY);
 
       if (error) {
         throw error;
@@ -486,19 +474,24 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         window.open(data.signedUrl, '_blank');
       }
     } catch (error) {
-      console.error('Error viewing file:', error);
-      toast.error('Gagal membuka dokumen');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal membuka dokumen';
+      toast.error(errorMessage);
     }
-  };
+  }, []);
   
-  // ✅ Add download function
-  const handleFileDownload = async (pathFile: string, namaFile: string) => {
+  const handleFileDownload = useCallback(async (pathFile: string, namaFile: string) => {
+    if (!pathFile || !namaFile) {
+      toast.error('Data file tidak valid');
+      return;
+    }
+
     try {
       const { data, error } = await supabase.storage
-        .from('santri-documents')
+        .from(STORAGE_BUCKET)
         .download(pathFile);
       
       if (error) throw error;
+      if (!data) throw new Error('File tidak ditemukan');
       
       // Create blob and download
       const url = URL.createObjectURL(data);
@@ -511,28 +504,26 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
       URL.revokeObjectURL(url);
       
       toast.success('File berhasil didownload');
-    } catch (error: any) {
-      console.error('Error downloading:', error);
-      toast.error('Gagal download file');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal download file';
+      toast.error(errorMessage);
     }
-  };
+  }, []);
 
-  // ✅ Add verification function
-  const handleVerifyDocument = async (docId: string) => {
+  const handleVerifyDocument = useCallback(async (docId: string) => {
+    if (!docId) {
+      toast.error('ID dokumen tidak valid');
+      return;
+    }
+
     try {
-      const user = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       const updateData = {
         status_verifikasi: verificationStatus,
-        verifikasi_oleh: user.data.user?.id,
+        verifikasi_oleh: user?.id,
         catatan_verifikasi: verificationNote,
         updated_at: new Date().toISOString()
       };
-      
-      console.log('🔍 Verifying document:', {
-        docId,
-        updateData,
-        verificationStatus
-      });
 
       const { error } = await supabase
         .from('dokumen_santri')
@@ -540,7 +531,6 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         .eq('id', docId);
 
       if (error) {
-        console.error('❌ Supabase error:', error);
         throw error;
       }
 
@@ -549,183 +539,387 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
       setVerificationDialog(null);
       setVerificationNote('');
       setVerificationStatus('Diverifikasi');
-
     } catch (error) {
-      console.error('Error verifying document:', error);
-      toast.error('Gagal memverifikasi dokumen');
+      const errorMessage = error instanceof Error ? error.message : 'Gagal memverifikasi dokumen';
+      toast.error(errorMessage);
     }
-  };
+  }, [verificationStatus, verificationNote, loadDokumen]);
 
-  // ✅ Add preview function
-  const handlePreviewDocument = (doc: DokumenItem) => {
+  const handlePreviewDocument = useCallback((doc: DokumenItem) => {
     setPreviewFile(doc);
-  };
+  }, []);
 
-  // Requirements akan di-load di loadDokumen, tidak perlu di sini
-  // Karena sekarang async dan di-load di useEffect
+  // Memoized calculations for performance
+  const { minimalDocs, khususDocs, pelengkapDocs } = useMemo(() => {
+    const minimal = dokumenList.filter(d => d.required);
+    const khusus = dokumenList.filter(d => d.jenis_dokumen?.includes('Khusus') || false);
+    const pelengkap = dokumenList.filter(d => !d.required);
+    return { minimalDocs: minimal, khususDocs: khusus, pelengkapDocs: pelengkap };
+  }, [dokumenList]);
 
-  // Calculate requirements from dokumenList
-  const minimalDocs = dokumenList.filter(d => d.required);
-  const khususDocs = dokumenList.filter(d => d.jenis_dokumen?.includes('Khusus') || false); // Adjust based on your logic
-  const pelengkapDocs = dokumenList.filter(d => !d.required);
-  
-  const minimalUploaded = minimalDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
-  const khususUploaded = khususDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
-  const pelengkapUploaded = pelengkapDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
-  
-  const minimalProgress = minimalDocs.length > 0 
-    ? (minimalUploaded / minimalDocs.length) * 100 
-    : 100;
-  const khususProgress = khususDocs.length > 0 
-    ? (khususUploaded / khususDocs.length) * 100 
-    : 100;
-  const pelengkapProgress = pelengkapDocs.length > 0 
-    ? (pelengkapUploaded / pelengkapDocs.length) * 100 
-    : 100;
+  const stats = useMemo(() => {
+    const minimalUploaded = minimalDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+    const khususUploaded = khususDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+    const pelengkapUploaded = pelengkapDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+    
+    const minimalProgress = minimalDocs.length > 0 
+      ? (minimalUploaded / minimalDocs.length) * 100 
+      : 100;
+    const khususProgress = khususDocs.length > 0 
+      ? (khususUploaded / khususDocs.length) * 100 
+      : 100;
+    const pelengkapProgress = pelengkapDocs.length > 0 
+      ? (pelengkapUploaded / pelengkapDocs.length) * 100 
+      : 100;
 
-  const isMinimalComplete = minimalProgress === 100;
-  const isKhususComplete = khususProgress === 100;
+    const totalUploaded = dokumenList.filter(d => d.uploaded).length;
+    const totalVerified = dokumenList.filter(d => d.uploaded && d.status_verifikasi === 'Diverifikasi').length;
+    const totalPending = dokumenList.filter(d => d.uploaded && d.status_verifikasi === 'Belum Diverifikasi').length;
+    const totalRequired = minimalDocs.length;
+    const totalUploadedRequired = minimalDocs.filter(d => d.uploaded && d.status_verifikasi !== 'Ditolak').length;
+
+    return {
+      minimalUploaded,
+      khususUploaded,
+      pelengkapUploaded,
+      minimalProgress,
+      khususProgress,
+      pelengkapProgress,
+      totalUploaded,
+      totalVerified,
+      totalPending,
+      totalRequired,
+      totalUploadedRequired,
+      isMinimalComplete: minimalProgress === 100,
+      isKhususComplete: khususProgress === 100
+    };
+  }, [dokumenList, minimalDocs, khususDocs, pelengkapDocs]);
 
   return (
     <div className="space-y-4">
-      {/* Header untuk Penerima Bantuan Yayasan */}
-      {isBantuanRecipient && (
-        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <FileText className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="font-medium text-blue-900">
-                  Dokumen Santri Binaan (Penerima Bantuan Yayasan)
+      {/* Progress Summary - At the Top */}
+      <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 border-emerald-200">
+        <CardContent className="p-5">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-600 rounded-lg">
+                  <FileText className="w-5 h-5 text-white" />
                 </div>
-                <div className="text-sm text-blue-700 mt-1">
-                  Status: <strong>{santriData.status_sosial || 'Lengkap'}</strong>
+                <div>
+                  <div className="font-semibold text-emerald-900">Progress Upload Dokumen</div>
+                  <div className="text-sm text-emerald-700">
+                    {isBantuanRecipient ? 'Dokumen Wajib & Opsional' : 'Dokumen Santri'}
                 </div>
               </div>
-              {isMinimalComplete && isKhususComplete && (
-                <Badge className="bg-green-600">
+              </div>
+              {stats.isMinimalComplete && (
+                <Badge className="bg-emerald-600">
                   <CheckCircle className="w-3 h-3 mr-1" />
                   Lengkap
                 </Badge>
               )}
             </div>
+
+            {/* Progress Stats - Simplified for santri */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="bg-white/60 rounded-lg p-3">
+                <div className="text-xs text-emerald-700 font-medium mb-1">Terupload</div>
+                <div className="text-lg font-bold text-emerald-900">{stats.totalUploaded}</div>
+                <div className="text-xs text-emerald-600">dari {minimalDocs.length + pelengkapDocs.length} dokumen</div>
+              </div>
+              <div className="bg-white/60 rounded-lg p-3">
+                <div className="text-xs text-emerald-700 font-medium mb-1">Wajib Lengkap</div>
+                <div className="text-lg font-bold text-emerald-900">{stats.totalUploadedRequired}/{stats.totalRequired}</div>
+                <div className="text-xs text-emerald-600">dokumen wajib</div>
+              </div>
+              {isAdminMode && (
+                <>
+                  <div className="bg-white/60 rounded-lg p-3">
+                    <div className="text-xs text-emerald-700 font-medium mb-1">Diverifikasi</div>
+                    <div className="text-lg font-bold text-green-600">{stats.totalVerified}</div>
+                    <div className="text-xs text-emerald-600">dokumen</div>
+                  </div>
+                  <div className="bg-white/60 rounded-lg p-3">
+                    <div className="text-xs text-emerald-700 font-medium mb-1">Belum Diverifikasi</div>
+                    <div className="text-lg font-bold text-amber-600">{stats.totalPending}</div>
+                    <div className="text-xs text-emerald-600">menunggu</div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-emerald-700 font-medium">Progress Total</span>
+                <span className="font-semibold text-emerald-900">
+                  {Math.round(((stats.minimalUploaded + stats.pelengkapUploaded) / (minimalDocs.length + pelengkapDocs.length)) * 100)}%
+                </span>
+              </div>
+              <Progress 
+                value={((stats.minimalUploaded + stats.pelengkapUploaded) / (minimalDocs.length + pelengkapDocs.length)) * 100} 
+                className="h-3 bg-emerald-200" 
+              />
+            </div>
+            </div>
           </CardContent>
         </Card>
-      )}
 
-      {/* Section 1: Dokumen Minimal */}
+      {/* Dokumen List - Mobile-Friendly Card Layout */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="w-5 h-5" />
-              {isBantuanRecipient ? '📋 Dokumen Wajib & Opsional' : '📄 Dokumen Santri'}
-            </CardTitle>
-            {isBantuanRecipient && (
-              <Badge variant={isMinimalComplete ? 'default' : 'secondary'}>
-                {minimalUploaded + pelengkapUploaded}/{minimalDocs.length + pelengkapDocs.length}
-              </Badge>
-            )}
-          </div>
-          {isBantuanRecipient && (
-            <div className="space-y-2 mt-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Progress Total</span>
-                <span className="font-medium">{Math.round(((minimalUploaded + pelengkapUploaded) / (minimalDocs.length + pelengkapDocs.length)) * 100)}%</span>
-              </div>
-              <Progress value={((minimalUploaded + pelengkapUploaded) / (minimalDocs.length + pelengkapDocs.length)) * 100} className="h-2" />
-            </div>
-          )}
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            {isBantuanRecipient ? 'Dokumen Wajib & Opsional' : 'Daftar Dokumen'}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Gabungkan dokumen wajib dan opsional */}
-            {[...minimalDocs, ...pelengkapDocs].map((dok, idx) => {
-              const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
-              const isUploading = uploadingFiles[dok.jenis_dokumen];
+          {/* Mobile: Card Layout */}
+          {isMobile ? (
+            <div className="space-y-3">
+              {[...minimalDocs, ...pelengkapDocs].map((dok, idx) => {
+                const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
+                const isUploading = uploadingFiles[dok.jenis_dokumen];
 
-              return (
-                <Card key={idx} className="relative">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm flex items-center justify-between">
-                      <span>{dok.label}</span>
-                      <Badge 
-                        variant={dok.required ? 'destructive' : 'outline'}
-                        className="text-xs"
-                      >
-                        {dok.required ? 'wajib' : 'opsional'}
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {/* Status Dokumen */}
-                    {uploaded?.uploaded ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(uploaded.status_verifikasi)}
-                          {uploaded.status_verifikasi && getStatusBadge(uploaded.status_verifikasi)}
+                return (
+                  <div
+                    key={idx}
+                    className="border rounded-lg p-4 bg-white hover:bg-slate-50/50 transition-colors"
+                  >
+                    {/* Header */}
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-sm">{dok.label}</span>
+                          <Badge 
+                            variant={dok.required ? 'destructive' : 'outline'}
+                            className="text-xs"
+                          >
+                            {dok.required ? 'Wajib' : 'Opsional'}
+                          </Badge>
                         </div>
-                        <p className="text-xs text-gray-600 truncate">{uploaded.nama_file}</p>
-                        <div className="flex gap-1 flex-wrap">
+                        {uploaded?.uploaded && isAdminMode && (
+                          <div className="flex items-center gap-2 mt-1">
+                            {getStatusIcon(uploaded.status_verifikasi)}
+                            {uploaded.status_verifikasi && (
+                              <span className="text-xs text-muted-foreground">
+                                {uploaded.status_verifikasi === 'Diverifikasi' ? 'Diverifikasi' :
+                                 uploaded.status_verifikasi === 'Ditolak' ? 'Ditolak' :
+                                 'Menunggu Verifikasi'}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {uploaded?.uploaded && !isAdminMode && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <CheckCircle className="w-3 h-3 text-emerald-600" />
+                            <span className="text-xs text-emerald-600">Telah diupload</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    {uploaded?.uploaded ? (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 mb-1">{uploaded.nama_file}</p>
+                          <p className="text-xs text-gray-500">
+                            {uploaded.tipe_file} • {uploaded.ukuran_file ? `${(uploaded.ukuran_file / 1024).toFixed(2)} KB` : ''}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handlePreviewDocument(uploaded)}
+                            className="flex-1 min-w-[100px]"
                           >
-                            <Eye className="w-3 h-3 mr-1" />
-                            Preview
+                            <Eye className="w-4 h-4 mr-1" />
+                            Lihat
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setVerificationDialog(uploaded)}
+                            onClick={() => handleFileDownload(uploaded.path_file!, uploaded.nama_file!)}
+                            className="flex-1 min-w-[100px]"
                           >
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            Verifikasi
+                            <Download className="w-4 h-4 mr-1" />
+                            Download
                           </Button>
+                          {isAdminMode && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setVerificationDialog(uploaded)}
+                              className="flex-1 min-w-[100px]"
+                            >
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Verifikasi
+                            </Button>
+                          )}
                           <Button
                             size="sm"
-                            variant="outline"
+                            variant="destructive"
                             onClick={() => handleFileDelete(uploaded.id!, uploaded.path_file!)}
+                            className="flex-1 min-w-[100px]"
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Trash2 className="w-4 h-4 mr-1" />
+                            Hapus
                           </Button>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-center py-4">
-                        <FileText className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-                        <p className="text-sm text-gray-500 mb-3">Belum diupload</p>
-                        <Input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                          onChange={(e) => {
-                            console.log('📂 File input changed:', e.target.files);
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              console.log('📄 Selected file:', file);
-                              handleFileUpload(dok.jenis_dokumen, file);
-                            } else {
-                              console.log('❌ No file selected');
-                            }
-                            // Reset input value to allow selecting the same file again
-                            e.target.value = '';
-                          }}
-                          disabled={isUploading}
-                          className="text-xs"
-                        />
+                      <div className="flex items-center gap-3 p-3 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50/50">
+                        <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-700 font-medium mb-1 truncate">Upload {dok.label}</p>
+                          <Input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                handleFileUpload(dok.jenis_dokumen, file);
+                              }
+                              e.target.value = '';
+                            }}
+                            disabled={isUploading}
+                            className="text-xs h-8"
+                          />
+                        </div>
+                        {isUploading && (
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                        )}
                       </div>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Desktop: Table Layout */
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12"></TableHead>
+                    <TableHead>Nama Dokumen</TableHead>
+                    <TableHead className="w-24">Wajib</TableHead>
+                    <TableHead className="w-32">Status</TableHead>
+                    <TableHead className="w-40">Aksi</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...minimalDocs, ...pelengkapDocs].map((dok, idx) => {
+                    const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
+                    const isUploading = uploadingFiles[dok.jenis_dokumen];
 
-                    {/* Format Info */}
-                    <p className="text-xs text-gray-500 text-center">
-                      Format: PDF/JPG/PNG/DOC (Max 10MB)
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                    return (
+                      <TableRow key={idx} className="hover:bg-slate-50/50">
+                          <TableCell className="font-medium">{dok.label}</TableCell>
+                          <TableCell>
+                            <Badge 
+                              variant={dok.required ? 'destructive' : 'outline'}
+                              className="text-xs"
+                            >
+                              {dok.required ? 'Wajib' : 'Opsional'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {uploaded?.uploaded ? (
+                              isAdminMode ? (
+                                <div className="flex items-center gap-2">
+                                  {getStatusIcon(uploaded.status_verifikasi)}
+                                  {uploaded.status_verifikasi && (
+                                    <span className="text-xs">
+                                      {uploaded.status_verifikasi === 'Diverifikasi' ? 'Diverifikasi' :
+                                       uploaded.status_verifikasi === 'Ditolak' ? 'Ditolak' :
+                                       'Menunggu'}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  Terupload
+                                </Badge>
+                              )
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Belum diupload</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {uploaded?.uploaded ? (
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handlePreviewDocument(uploaded)}
+                                  className="h-7 text-xs px-2"
+                                  title="Lihat dokumen"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleFileDownload(uploaded.path_file!, uploaded.nama_file!)}
+                                  className="h-7 text-xs px-2"
+                                  title="Download dokumen"
+                                >
+                                  <Download className="w-3 h-3" />
+                                </Button>
+                                {isAdminMode && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setVerificationDialog(uploaded)}
+                                    className="h-7 text-xs px-2"
+                                    title="Verifikasi dokumen"
+                                  >
+                                    <CheckCircle className="w-3 h-3" />
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleFileDelete(uploaded.id!, uploaded.path_file!)}
+                                  className="h-7 text-xs px-2 text-red-600 hover:text-red-700"
+                                  title="Hapus dokumen"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="file"
+                                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      handleFileUpload(dok.jenis_dokumen, file);
+                                    }
+                                    e.target.value = '';
+                                  }}
+                                  disabled={isUploading}
+                                  className="h-7 text-xs w-32"
+                                />
+                                {isUploading && (
+                                  <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -736,83 +930,237 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
                 <FileText className="w-5 h-5 text-amber-600" />
-                📋 Dokumen Khusus ({santriData.status_sosial})
+                Dokumen Khusus ({santriData.status_sosial})
               </CardTitle>
-              <Badge variant={isKhususComplete ? 'default' : 'secondary'}>
-                {khususUploaded}/{khususDocs.length}
+              <Badge variant={stats.isKhususComplete ? 'default' : 'secondary'}>
+                {stats.khususUploaded}/{khususDocs.length}
               </Badge>
             </div>
             <div className="space-y-2 mt-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Progress</span>
-                <span className="font-medium">{Math.round(khususProgress)}%</span>
+                <span className="font-medium">{Math.round(stats.khususProgress)}%</span>
               </div>
-              <Progress value={khususProgress} className="h-2" />
+              <Progress value={stats.khususProgress} className="h-2" />
             </div>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {khususDocs.map((dok, idx) => {
-              const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
-              
-              return (
-                <div key={idx} className="flex items-center justify-between p-3 border-2 border-amber-200 rounded-lg hover:bg-amber-50">
-                  <div className="flex items-center gap-3 flex-1">
-                    {getStatusIcon(uploaded?.status_verifikasi)}
-                    <div className="flex-1">
-                      <div className="font-medium text-sm">{dok.label}</div>
-                      {uploaded?.uploaded && (
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          📎 {uploaded.nama_file}
+          <CardContent>
+            {/* Mobile: Card Layout */}
+            {isMobile ? (
+              <div className="space-y-3">
+                {khususDocs.map((dok, idx) => {
+                  const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
+                  const isUploading = uploadingFiles[dok.jenis_dokumen];
+
+                  return (
+                    <div
+                      key={idx}
+                      className="border-2 border-amber-200 rounded-lg p-4 bg-amber-50/30 hover:bg-amber-50/50 transition-colors"
+                    >
+                      {/* Header */}
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="font-medium text-sm mb-1">{dok.label}</div>
+                          {uploaded?.uploaded && isAdminMode && (
+                            <div className="flex items-center gap-2 mt-1">
+                              {getStatusIcon(uploaded.status_verifikasi)}
+                              {uploaded.status_verifikasi && (
+                                <span className="text-xs text-muted-foreground">
+                                  {uploaded.status_verifikasi === 'Diverifikasi' ? 'Diverifikasi' :
+                                   uploaded.status_verifikasi === 'Ditolak' ? 'Ditolak' :
+                                   'Menunggu Verifikasi'}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {uploaded?.uploaded && !isAdminMode && (
+                            <div className="flex items-center gap-2 mt-1">
+                              <CheckCircle className="w-3 h-3 text-emerald-600" />
+                              <span className="text-xs text-emerald-600">Telah diupload</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      {uploaded?.uploaded ? (
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 mb-1">{uploaded.nama_file}</p>
+                            <p className="text-xs text-gray-500">
+                              {uploaded.tipe_file} • {uploaded.ukuran_file ? `${(uploaded.ukuran_file / 1024).toFixed(2)} KB` : ''}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleFileView(uploaded.path_file!)}
+                              className="h-8 text-xs"
+                            >
+                              <Eye className="w-3 h-3 mr-1" />
+                              Lihat
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleFileDownload(uploaded.path_file!, uploaded.nama_file!)}
+                              className="h-8 text-xs"
+                            >
+                              <Download className="w-3 h-3 mr-1" />
+                              Download
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleFileDelete(uploaded.id!, uploaded.path_file!)}
+                              className="h-8 text-xs"
+                            >
+                              <Trash2 className="w-3 h-3 mr-1" />
+                              Hapus
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3 p-3 border-2 border-dashed border-amber-300 rounded-lg bg-white/50">
+                          <FileText className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-700 font-medium mb-1 truncate">Upload {dok.label}</p>
+                            <Input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  handleFileUpload(dok.jenis_dokumen, file);
+                                }
+                                e.target.value = '';
+                              }}
+                              disabled={isUploading}
+                              className="text-xs h-8"
+                            />
+                          </div>
+                          {isUploading && (
+                            <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                          )}
                         </div>
                       )}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {uploaded?.status_verifikasi && getStatusBadge(uploaded.status_verifikasi)}
-                    {uploaded?.uploaded ? (
-                      <div className="flex gap-1">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleFileView(uploaded.path_file!)}
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          Lihat
-                        </Button>
-                        <Button 
-                          variant="destructive" 
-                          size="sm"
-                          onClick={() => handleFileDelete(uploaded.id!, uploaded.path_file!)}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <>
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                          className="hidden"
-                          id={`upload-khusus-${dok.jenis_dokumen}`}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              handleFileUpload(dok.jenis_dokumen, file);
-                            }
-                          }}
-                        />
-                        <label htmlFor={`upload-khusus-${dok.jenis_dokumen}`}>
-                          <Button variant="outline" size="sm" className="border-amber-400 text-amber-700" type="button">
-                            <Upload className="w-4 h-4 mr-1" />
-                            Upload
-                          </Button>
-                        </label>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            ) : (
+              /* Desktop: Table Layout */
+              <div className="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[200px]">Nama Dokumen</TableHead>
+                      <TableHead className="w-32">Status</TableHead>
+                      <TableHead className="w-48">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {khususDocs.map((dok, idx) => {
+                      const uploaded = dokumenList.find(d => d.jenis_dokumen === dok.jenis_dokumen);
+                      const isUploading = uploadingFiles[dok.jenis_dokumen];
+                
+                      return (
+                        <TableRow key={idx} className="hover:bg-amber-50/50">
+                            <TableCell className="font-medium">{dok.label}</TableCell>
+                            <TableCell>
+                              {uploaded?.uploaded ? (
+                                isAdminMode ? (
+                                  <div className="flex items-center gap-2">
+                                    {getStatusIcon(uploaded.status_verifikasi)}
+                                    {uploaded.status_verifikasi && (
+                                      <span className="text-xs">
+                                        {uploaded.status_verifikasi === 'Diverifikasi' ? 'Diverifikasi' :
+                                         uploaded.status_verifikasi === 'Ditolak' ? 'Ditolak' :
+                                         'Menunggu'}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    Terupload
+                                  </Badge>
+                                )
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Belum diupload</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {uploaded?.uploaded ? (
+                                <div className="flex gap-1">
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => handleFileView(uploaded.path_file!)}
+                                    className="h-7 text-xs px-2"
+                                    title="Lihat dokumen"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                  </Button>
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => handleFileDownload(uploaded.path_file!, uploaded.nama_file!)}
+                                    className="h-7 text-xs px-2"
+                                    title="Download dokumen"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                  </Button>
+                                  {isAdminMode && (
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => setVerificationDialog(uploaded)}
+                                      className="h-7 text-xs px-2"
+                                      title="Verifikasi dokumen"
+                                    >
+                                      <CheckCircle className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => handleFileDelete(uploaded.id!, uploaded.path_file!)}
+                                    className="h-7 text-xs px-2 text-red-600 hover:text-red-700"
+                                    title="Hapus dokumen"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        handleFileUpload(dok.jenis_dokumen, file);
+                                      }
+                                      e.target.value = '';
+                                    }}
+                                    disabled={isUploading}
+                                    className="h-7 text-xs w-32"
+                                  />
+                                  {isUploading && (
+                                    <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
+                                  )}
+                                </div>
+                              )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -820,8 +1168,8 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
 
       {/* Status Summary */}
       {isBantuanRecipient && (
-        <Alert className={isMinimalComplete ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}>
-          {isMinimalComplete ? (
+        <Alert className={stats.isMinimalComplete ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}>
+          {stats.isMinimalComplete ? (
             <>
               <CheckCircle className="h-4 w-4 text-green-600" />
               <AlertDescription>
@@ -840,7 +1188,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
                   ⚠️ Mohon Lengkapi Dokumen Wajib
                 </div>
                 <div className="text-sm text-amber-700 mt-1">
-                  Masih kurang {minimalDocs.length - minimalUploaded} dokumen wajib.
+                  Masih kurang {minimalDocs.length - stats.minimalUploaded} dokumen wajib.
                   Silakan upload untuk melanjutkan proses bantuan yayasan.
                 </div>
               </AlertDescription>
@@ -856,14 +1204,14 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
           <DialogHeader>
             <DialogTitle>Preview Dokumen</DialogTitle>
             <DialogDescription>
-              Lihat dan verifikasi dokumen yang telah diupload
+              {isAdminMode ? 'Lihat dan verifikasi dokumen yang telah diupload' : 'Lihat dokumen yang telah diupload'}
             </DialogDescription>
           </DialogHeader>
           {previewFile && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-medium">{previewFile.nama_file}</h3>
-                {previewFile.status_verifikasi && (
+                {isAdminMode && previewFile.status_verifikasi && (
                   <Badge className={
                     previewFile.status_verifikasi === 'Diverifikasi' ? 'bg-green-100 text-green-800' :
                     previewFile.status_verifikasi === 'Ditolak' ? 'bg-red-100 text-red-800' :
@@ -878,7 +1226,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
               <div className="w-full border rounded-lg p-6 bg-gray-50">
                 <div className="text-center space-y-4">
                   {previewFile.tipe_file?.startsWith('image/') ? (
-                    <Image className="w-16 h-16 mx-auto text-blue-500" />
+                    <FileText className="w-16 h-16 mx-auto text-blue-500" />
                   ) : previewFile.tipe_file === 'application/pdf' ? (
                     <FileText className="w-16 h-16 mx-auto text-red-500" />
                   ) : (
@@ -918,8 +1266,9 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
         </DialogContent>
       </Dialog>
 
-      {/* Verification Dialog */}
-      <Dialog open={!!verificationDialog} onOpenChange={() => setVerificationDialog(null)}>
+      {/* Verification Dialog - Only for Admin */}
+      {isAdminMode && (
+        <Dialog open={!!verificationDialog} onOpenChange={() => setVerificationDialog(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Verifikasi Dokumen</DialogTitle>
@@ -931,7 +1280,7 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
             <div className="space-y-4">
               <div>
                 <Label>Status Validasi</Label>
-                <Select value={verificationStatus} onValueChange={(value: any) => setVerificationStatus(value)}>
+                <Select value={verificationStatus} onValueChange={(value: VerificationStatus) => setVerificationStatus(value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -965,9 +1314,11 @@ const DokumenSantriTab: React.FC<DokumenSantriTabProps> = ({
           )}
         </DialogContent>
       </Dialog>
+      )}
     </div>
   );
 };
 
 export default DokumenSantriTab;
+
 

@@ -52,7 +52,7 @@ interface SantriReport {
   id: string;
   nama_lengkap: string;
   kategori: string;
-  nis?: string;
+  id_santri?: string;
   total_tagihan: number;
   total_bayar: number;
   total_beasiswa: number;
@@ -118,7 +118,7 @@ const LaporanKeuanganManager = () => {
           id,
           nama_lengkap,
           kategori,
-          nis,
+          id_santri,
           status_approval
         `)
         .eq('status_approval', 'disetujui')
@@ -234,7 +234,7 @@ const LaporanKeuanganManager = () => {
         id: santri.id,
         nama_lengkap: santri.nama_lengkap,
         kategori: santri.kategori,
-        nisn: santri.nisn,
+        id_santri: santri.id_santri,
         total_tagihan: totalTagihan,
         total_bayar: totalBayar,
         total_beasiswa: totalBeasiswa,
@@ -471,7 +471,7 @@ const LaporanKeuanganManager = () => {
                         <TableCell>
                           <div>
                             <p className="font-medium">{santri.nama_lengkap}</p>
-                            <p className="text-sm text-muted-foreground">NISN: {santri.nisn || 'Belum ada'}</p>
+                            <p className="text-sm text-muted-foreground">ID Santri: {santri.id_santri || 'Belum ada'}</p>
                           </div>
                         </TableCell>
                         <TableCell>

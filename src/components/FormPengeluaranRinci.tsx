@@ -394,7 +394,7 @@ interface AlokasiSantri {
   id: string;
   santri_id: string;
   nama_lengkap: string;
-  nisn: string;
+  id_santri: string;
   nominal_alokasi: number;
   persentase_alokasi: number;
   jenis_bantuan: string;
@@ -407,7 +407,6 @@ interface AlokasiSantri {
 interface SantriOption {
   id: string;
   nama_lengkap: string;
-  nisn: string;
   id_santri: string;
   program?: string;
 }
@@ -719,7 +718,7 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
       id: `alloc-${Date.now()}`,
       santri_id: santriId,
       nama_lengkap: santri.nama_lengkap,
-      nisn: santri.nisn,
+      id_santri: santri.id_santri || '',
       nominal_alokasi: 0,
       persentase_alokasi: 0,
       jenis_bantuan: subKategori || 'Bantuan',
@@ -835,7 +834,7 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
           id: `alloc-${santriId}-${rincian.id}-${Date.now()}-${Math.random()}`,
           santri_id: santriId,
           nama_lengkap: santri.nama_lengkap,
-          nisn: santri.nisn,
+          id_santri: santri.id_santri || '',
           nominal_alokasi: nominalPerSantri,
           persentase_alokasi: persentase,
           jenis_bantuan: rincian.nama_item, // Gunakan nama item sebagai jenis bantuan
@@ -1230,7 +1229,7 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
           id: `alloc-${santriId}-${bulan}-${Date.now()}-${Math.random()}`,
           santri_id: santriId,
           nama_lengkap: santri.nama_lengkap,
-          nisn: santri.nisn,
+          id_santri: santri.id_santri || '',
           nominal_alokasi: nominalValue,
           persentase_alokasi: 0, // Akan dihitung setelah semua alokasi dibuat
           jenis_bantuan: jenisBantuan,
@@ -1544,7 +1543,7 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
                                     <div>
                                       <div className="font-medium">{santri?.nama_lengkap || 'Tidak Diketahui'}</div>
                                       <div className="text-xs text-muted-foreground">
-                                        {santri?.id_santri || santri?.nisn || ''}
+                                        {santri?.id_santri || ''}
                                       </div>
                                     </div>
                                     <div className="text-right ml-4">
@@ -1975,7 +1974,7 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
                         <div>
                           <div className="font-semibold text-lg">{firstAlloc.nama_lengkap}</div>
                           <div className="text-xs text-muted-foreground">
-                            ID: {santriOptions.find(s => s.id === santriId)?.id_santri || firstAlloc.nisn}
+                            ID Santri: {santriOptions.find(s => s.id === santriId)?.id_santri || firstAlloc.id_santri || ''}
                           </div>
                         </div>
                         <div className="text-right">

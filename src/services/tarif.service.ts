@@ -50,7 +50,7 @@ export class TarifService {
         .from('tarif_santri')
         .select(`
           *,
-          santri:santri_id(nama_lengkap, nisn, kategori, tipe_pembayaran)
+          santri:santri_id(nama_lengkap, id_santri, kategori, tipe_pembayaran)
         `)
         .eq('santri_id', santri_id)
         .eq('is_active', true)
@@ -85,7 +85,7 @@ export class TarifService {
         .from('tarif_santri')
         .select(`
           *,
-          santri:santri_id(nama_lengkap, nisn, kategori, tipe_pembayaran)
+          santri:santri_id(nama_lengkap, id_santri, kategori, tipe_pembayaran)
         `)
         .order('created_at', { ascending: false });
 
@@ -119,7 +119,7 @@ export class TarifService {
     try {
       const { data, error } = await supabase
         .from('santri')
-        .select('id, id_santri, nisn, nama_lengkap, kategori, tipe_pembayaran, status_santri')
+        .select('id, id_santri, nama_lengkap, kategori, tipe_pembayaran, status_santri')
         .eq('status_approval', 'disetujui')
         .in('kategori', ['Reguler', 'Mahasantri'])
         .order('nama_lengkap');

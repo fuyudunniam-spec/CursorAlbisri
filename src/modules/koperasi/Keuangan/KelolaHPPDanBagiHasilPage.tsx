@@ -85,7 +85,7 @@ const KelolaHPPDanBagiHasilPage = () => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'with_hpp' | 'without_hpp'>('all');
   
   // State untuk Riwayat Bagi Hasil (dari BagiHasilPage)
-  const [dateFilter, setDateFilter] = useState<string>('bulan-ini');
+  const [dateFilter, setDateFilter] = useState<string>('semua');
   const [transactions, setTransactions] = useState<any[]>([]);
   const [showTransactionDetail, setShowTransactionDetail] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
@@ -173,9 +173,21 @@ const KelolaHPPDanBagiHasilPage = () => {
         startDate = startOfYear(now);
         endDate = endOfYear(now);
         break;
+      case 'tahun-lalu':
+        const lastYear = now.getFullYear() - 1;
+        startDate = startOfYear(new Date(lastYear, 0, 1));
+        endDate = endOfYear(new Date(lastYear, 11, 31));
+        break;
+      case 'semua':
+        // Untuk 'semua', return range yang sangat luas untuk mengambil semua data
+        // Menggunakan tanggal sangat lama hingga hari ini
+        startDate = new Date(0); // Epoch start (1970-01-01)
+        endDate = endOfDay(now); // Today end of day
+        break;
       default:
-        startDate = startOfMonth(now);
-        endDate = endOfMonth(now);
+        // Default to 'semua' behavior - tampilkan semua data
+        startDate = new Date(0); // Epoch start (1970-01-01)
+        endDate = endOfDay(now); // Today end of day
     }
 
     return { startDate, endDate };
@@ -226,29 +238,39 @@ const KelolaHPPDanBagiHasilPage = () => {
       }
       
       // 1. Ambil dari keuangan (source_module = 'koperasi') - transaksi baru
-      const { data: dataKeuangan, error: errorKeuangan } = await supabase
+      let keuanganQuery = supabase
         .from('keuangan')
         .select('id, tanggal, deskripsi, jumlah, kategori, sub_kategori, penerima_pembayar, akun_kas_id')
         .eq('jenis_transaksi', 'Pengeluaran')
         .eq('status', 'posted')
         .eq('source_module', 'koperasi')
-        .in('akun_kas_id', koperasiAccountIds)
-        .gte('tanggal', dateRange.startDate.toISOString())
-        .lte('tanggal', dateRange.endDate.toISOString())
-        .order('tanggal', { ascending: false });
+        .in('akun_kas_id', koperasiAccountIds);
+      
+      // Apply date filter (skip if 'semua')
+      if (dateFilter !== 'semua') {
+        keuanganQuery = keuanganQuery.gte('tanggal', dateRange.startDate.toISOString());
+        keuanganQuery = keuanganQuery.lte('tanggal', dateRange.endDate.toISOString());
+      }
+      
+      const { data: dataKeuangan, error: errorKeuangan } = await keuanganQuery.order('tanggal', { ascending: false });
 
       if (errorKeuangan) throw errorKeuangan;
       
       // 2. Ambil dari keuangan_koperasi (tabel lama) - untuk backward compatibility
-      const { data: dataKoperasi, error: errorKoperasi } = await supabase
+      let koperasiQuery = supabase
         .from('keuangan_koperasi')
         .select('id, tanggal, deskripsi, jumlah, kategori, sub_kategori, penerima_pembayar, akun_kas_id')
         .eq('jenis_transaksi', 'Pengeluaran')
         .eq('status', 'posted')
-        .in('akun_kas_id', koperasiAccountIds)
-        .gte('tanggal', dateRange.startDate.toISOString())
-        .lte('tanggal', dateRange.endDate.toISOString())
-        .order('tanggal', { ascending: false });
+        .in('akun_kas_id', koperasiAccountIds);
+      
+      // Apply date filter (skip if 'semua')
+      if (dateFilter !== 'semua') {
+        koperasiQuery = koperasiQuery.gte('tanggal', dateRange.startDate.toISOString());
+        koperasiQuery = koperasiQuery.lte('tanggal', dateRange.endDate.toISOString());
+      }
+      
+      const { data: dataKoperasi, error: errorKoperasi } = await koperasiQuery.order('tanggal', { ascending: false });
 
       if (errorKoperasi) throw errorKoperasi;
       
@@ -332,7 +354,7 @@ const KelolaHPPDanBagiHasilPage = () => {
       // Hanya mengambil data dari kop_penjualan (modul penjualan koperasi)
       // Semua data penjualan sudah terpusat di kop_penjualan setelah migrasi
       // Mengambil SEMUA owner_type (yayasan dan koperasi), filter akan dilakukan di UI
-      const { data: kopPenjualan, error: kopError } = await supabase
+      let kopPenjualanQuery = supabase
         .from('kop_penjualan')
         .select(`
           id,
@@ -367,10 +389,15 @@ const KelolaHPPDanBagiHasilPage = () => {
             )
           )
         `)
-        .eq('status_pembayaran', 'lunas') // Hanya penjualan yang sudah lunas (sama dengan modul penjualan)
-        .gte('tanggal', dateRange.startDate.toISOString())
-        .lte('tanggal', dateRange.endDate.toISOString())
-        .order('tanggal', { ascending: false });
+        .eq('status_pembayaran', 'lunas'); // Hanya penjualan yang sudah lunas (sama dengan modul penjualan)
+      
+      // Apply date filter (skip if 'semua')
+      if (dateFilter !== 'semua') {
+        kopPenjualanQuery = kopPenjualanQuery.gte('tanggal', dateRange.startDate.toISOString());
+        kopPenjualanQuery = kopPenjualanQuery.lte('tanggal', dateRange.endDate.toISOString());
+      }
+      
+      const { data: kopPenjualan, error: kopError } = await kopPenjualanQuery.order('tanggal', { ascending: false });
 
       if (kopError) {
         throw new Error(`Gagal memuat data penjualan: ${kopError.message}`);
@@ -916,16 +943,22 @@ const KelolaHPPDanBagiHasilPage = () => {
 
       const { startDate, endDate } = getDateRangeForBagiHasil();
 
-      const { data: txData, error: txError } = await supabase
+      let txQuery = supabase
         .from('keuangan_koperasi')
         .select(`
           *,
           akun_kas:akun_kas_id(nama, saldo_saat_ini)
         `)
         .eq('akun_kas_id', akunId)
-        .eq('kategori', 'Bagi Hasil')
-        .gte('tanggal', startDate.toISOString())
-        .lte('tanggal', endDate.toISOString())
+        .eq('kategori', 'Bagi Hasil');
+      
+      // Apply date filter (skip if 'semua')
+      if (dateFilter !== 'semua') {
+        txQuery = txQuery.gte('tanggal', startDate.toISOString());
+        txQuery = txQuery.lte('tanggal', endDate.toISOString());
+      }
+      
+      const { data: txData, error: txError } = await txQuery
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false });
 
@@ -1051,11 +1084,13 @@ const KelolaHPPDanBagiHasilPage = () => {
                     <SelectValue placeholder="Periode" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="semua">Semua Waktu</SelectItem>
                     <SelectItem value="hari-ini">Hari Ini</SelectItem>
                     <SelectItem value="minggu-ini">Minggu Ini</SelectItem>
                     <SelectItem value="bulan-ini">Bulan Ini</SelectItem>
                     <SelectItem value="bulan-lalu">Bulan Lalu</SelectItem>
                     <SelectItem value="tahun-ini">Tahun Ini</SelectItem>
+                    <SelectItem value="tahun-lalu">Tahun Lalu</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1801,11 +1836,13 @@ const KelolaHPPDanBagiHasilPage = () => {
                     <SelectValue placeholder="Pilih periode" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="semua">Semua Waktu</SelectItem>
                     <SelectItem value="hari-ini">Hari Ini</SelectItem>
                     <SelectItem value="minggu-ini">Minggu Ini</SelectItem>
                     <SelectItem value="bulan-ini">Bulan Ini</SelectItem>
                     <SelectItem value="bulan-lalu">Bulan Lalu</SelectItem>
                     <SelectItem value="tahun-ini">Tahun Ini</SelectItem>
+                    <SelectItem value="tahun-lalu">Tahun Lalu</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button

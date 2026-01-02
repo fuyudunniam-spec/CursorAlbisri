@@ -104,7 +104,7 @@ export class TagihanService {
         .from('tagihan_santri')
         .select(`
           *,
-          santri:santri_id(id, id_santri, nama_lengkap, nisn, kategori)
+          santri:santri_id(id, id_santri, nama_lengkap, kategori)
         `)
         .order('periode', { ascending: false });
 
@@ -137,7 +137,7 @@ export class TagihanService {
         .from('tagihan_santri')
         .select(`
           *,
-          santri:santri_id(nama_lengkap, nisn, kategori)
+          santri:santri_id(nama_lengkap, id_santri, kategori)
         `)
         .eq('id', id)
         .single();
@@ -276,7 +276,7 @@ export class TagihanService {
           *,
           donatur:donatur_id(id, donor_name, kategori_donasi),
           tagihan:tagihan_id(id, periode, bulan, tahun_ajaran),
-          santri:santri_id(id, id_santri, nama_lengkap, nisn, kategori)
+          santri:santri_id(id, id_santri, nama_lengkap, kategori)
         `)
         .eq('tagihan_id', tagihan_id)
         .order('tanggal_bayar', { ascending: false });
@@ -307,7 +307,7 @@ export class TagihanService {
           *,
           donatur:donatur_id(id, donor_name, kategori_donasi),
           tagihan:tagihan_id(id, periode, bulan, tahun_ajaran, total_tagihan),
-          santri:santri_id(id, id_santri, nama_lengkap, nisn, kategori)
+          santri:santri_id(id, id_santri, nama_lengkap, kategori)
         `)
         .order('tanggal_bayar', { ascending: false });
 
@@ -397,7 +397,7 @@ export class TagihanService {
           *,
           donatur:donatur_id(id, donor_name, kategori_donasi),
           tagihan:tagihan_id(id, periode, bulan, tahun_ajaran, total_tagihan, komponen_tagihan),
-          santri:santri_id(id, id_santri, nama_lengkap, nisn, kategori, alamat, no_hp)
+          santri:santri_id(id, id_santri, nama_lengkap, kategori, alamat, no_hp)
         `)
         .eq('id', id)
         .single();
@@ -418,7 +418,7 @@ export class TagihanService {
     try {
       const { data, error } = await supabase
         .from('santri')
-        .select('id, id_santri, nisn, nama_lengkap, kategori, tipe_pembayaran')
+        .select('id, id_santri, nama_lengkap, kategori, tipe_pembayaran')
         .eq('status_approval', 'disetujui')
         .in('kategori', ['Reguler', 'Mahasantri', 'Binaan Mukim', 'Binaan Non Mukim', 'Mahasiswa'])
         .order('nama_lengkap');

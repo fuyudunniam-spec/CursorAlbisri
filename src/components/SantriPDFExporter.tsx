@@ -156,7 +156,7 @@ const SantriPDFExporter: React.FC<SantriPDFExporterProps> = ({
             </Avatar>
             <div>
               <h3 className="text-lg font-semibold">{santri?.nama_lengkap}</h3>
-              <p className="text-gray-600">NISN: {santri?.nisn || 'Belum ada'}</p>
+              <p className="text-gray-600">ID Santri: {santri?.id_santri || 'Belum ada'}</p>
               <div className="flex gap-2 mt-2">
                 <Badge className={cn("text-xs", getStatusBadgeColor((santri?.status_santri || santri?.status_baru) || ''))}>
                   {santri?.status_santri || santri?.status_baru}

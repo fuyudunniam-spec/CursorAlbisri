@@ -944,8 +944,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                                               keterangan,
                                               santri:santri_id(
                                                 nama_lengkap,
-                                                id_santri,
-                                                nisn
+                                                id_santri
                                               )
                                             `)
                                             .eq('keuangan_id', transaction.id);
@@ -980,7 +979,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                                               {alloc.santri?.nama_lengkap || 'Tidak Diketahui'}
                                             </div>
                                             <div className="text-gray-600">
-                                              {alloc.santri?.id_santri || alloc.santri?.nisn || ''} • {alloc.jenis_bantuan || 'Bantuan'}
+                                              {alloc.santri?.id_santri || ''} • {alloc.jenis_bantuan || 'Bantuan'}
                                             </div>
                                             <div className="text-gray-500 text-[10px]">
                                               {alloc.periode && `Periode: ${alloc.periode}`}
@@ -1179,8 +1178,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                                           keterangan,
                                           santri:santri_id(
                                             nama_lengkap,
-                                            id_santri,
-                                            nisn
+                                            id_santri
                                           )
                                         `)
                                         .eq('keuangan_id', transaction.id);
@@ -1215,7 +1213,7 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                                           {alloc.santri?.nama_lengkap || 'Tidak Diketahui'}
                                         </div>
                                         <div className="text-gray-600">
-                                          {alloc.santri?.id_santri || alloc.santri?.nisn || ''} • {alloc.jenis_bantuan || 'Bantuan'}
+                                          {alloc.santri?.id_santri || ''} • {alloc.jenis_bantuan || 'Bantuan'}
                                         </div>
                                         <div className="text-gray-500 text-[10px]">
                                           {alloc.periode && `Periode: ${alloc.periode}`}

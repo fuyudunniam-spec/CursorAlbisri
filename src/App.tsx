@@ -7,28 +7,32 @@ import { lazy, Suspense } from "react";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
-import Santri from "./pages/Santri";
 import SantriEnhanced from "./pages/SantriEnhanced";
-// Removed legacy profile imports - files deleted, routes redirected to canonical /santri/profile
-import SantriProfileFull from "./pages/SantriProfileFull";
+// Removed legacy profile imports - files deleted, routes redirected to canonical /santri/profile5
 import Monitoring from "./pages/Monitoring";
 import Tabungan from "./pages/Tabungan";
 import TabunganRouter from "./pages/TabunganRouter";
 import TabunganSantriAdmin from "./pages/TabunganSantriAdmin";
 import LaporanTabungan from "./pages/LaporanTabungan";
 import DonasiDashboard from "./pages/DonasiDashboard";
-// Modul Kebutuhan Layanan Santri - DINONAKTIFKAN
-// import RancanganPelayananSantri from "./pages/RancanganPelayananSantri";
-// import RancanganDashboard from "./components/rancangan/RancanganDashboard";
+// Modul Kebutuhan Layanan Santri - DINONAKTIFKAN (files removed)
 import MasterDonatur from "./pages/MasterDonatur";
 // Removed legacy imports - files deleted after routing canonical consolidation
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
-import SantriProfile from "./pages/SantriProfile";
-import SantriProfileRedesigned from "./pages/SantriProfileRedesigned";
+// ProfileLayout with nested routes is the canonical profile implementation
 import SantriOnboarding from "./pages/SantriOnboarding";
 import SantriAccountManagement from "./pages/SantriAccountManagement";
 import ChangePassword from "./pages/ChangePassword";
+import ProfileLayout from "./components/ProfileLayout";
+import ProfileRedirect from "./components/ProfileRedirect";
+import RingkasanPage from "./pages/santri/RingkasanPage";
+import InformasiPage from "./pages/santri/InformasiPage";
+import AkademikPage from "./pages/santri/AkademikPage";
+import KeuanganPage from "./pages/santri/KeuanganPage";
+import TabunganPage from "./pages/santri/TabunganPage";
+import LayananPage from "./pages/santri/LayananPage";
+import DokumenPage from "./pages/santri/DokumenPage";
 // Removed: ProgramSantri, ApprovalSantri (no longer used)
 // Removed: PloatingKelas - redirecting to /akademik/kelas?tab=plotting
 import TagihanSantri from "./pages/TagihanSantri";
@@ -344,18 +348,35 @@ const App = () => (
                 </Suspense>
               </Layout>
             } />
-            <Route path="/santri/add" element={<SantriProfileFull mode="add" />} />
+            <Route path="/santri/add" element={<Navigate to="/santri" replace />} />
             <Route path="/santri/onboarding" element={<SantriOnboarding />} />
+            {/* Legacy profile route - redirect to new nested route structure */}
             <Route path="/santri/profile" element={
               <Layout>
-                <SantriProfileRedesigned />
+                <ProfileRedirect />
               </Layout>
             } />
+            {/* New nested profile routes */}
+            <Route path="/santri/profile/:id" element={
+              <Layout>
+                <ProfileLayout />
+              </Layout>
+            }>
+              <Route index element={<RingkasanPage />} />
+              <Route path="ringkasan" element={<RingkasanPage />} />
+              <Route path="informasi" element={<InformasiPage />} />
+              <Route path="akademik" element={<AkademikPage />} />
+              <Route path="keuangan" element={<KeuanganPage />} />
+              <Route path="tabungan" element={<TabunganPage />} />
+              <Route path="layanan" element={<LayananPage />} />
+              <Route path="dokumen" element={<DokumenPage />} />
+            </Route>
             {/* Backward compatibility - redirect old profile routes */}
             <Route path="/santri/profile-enhanced" element={<Navigate to="/santri/profile" replace />} />
             <Route path="/santri/profile-minimal" element={<Navigate to="/santri/profile" replace />} />
             <Route path="/santri/profile-master" element={<Navigate to="/santri/profile" replace />} />
             <Route path="/santri/profile-redesigned" element={<Navigate to="/santri/profile" replace />} />
+            {/* Legacy profile routes removed - all use ProfileLayout with nested routes */}
             <Route path="/santri/program-management/:santriId" element={
               <Layout>
                 <ProgramSantriBiayaManager />
@@ -387,27 +408,7 @@ const App = () => (
               </Layout>
             } />
             <Route path="/donasi-dashboard" element={<Navigate to="/donasi" replace />} />
-            {/* Modul Kebutuhan Layanan Santri - DINONAKTIFKAN */}
-            {/* <Route path="/donasi/kebutuhan-layanan" element={
-              <Layout>
-                <RancanganPelayananSantri />
-              </Layout>
-            } /> */}
-            {/* <Route path="/donasi/rancangan-pelayanan" element={
-              <Layout>
-                <RancanganPelayananSantri />
-              </Layout>
-            } /> */}
-            {/* <Route path="/donasi/kebutuhan-layanan/dashboard" element={
-              <Layout>
-                <RancanganDashboard />
-              </Layout>
-            } /> */}
-            {/* <Route path="/donasi/rancangan-pelayanan/dashboard" element={
-              <Layout>
-                <RancanganDashboard />
-              </Layout>
-            } /> */}
+            {/* Modul Kebutuhan Layanan Santri - DINONAKTIFKAN (routes removed) */}
             <Route path="/donasi/master-donatur" element={
               <Layout>
                 <MasterDonatur />
