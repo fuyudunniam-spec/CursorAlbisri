@@ -198,7 +198,7 @@ const SidebarContent = () => {
       title: 'PROFIL',
       icon: UserIcon,
       items: [
-        { icon: UserIcon, label: 'Ringkasan', path: `${santriProfileBase}/ringkasan` },
+        { icon: UserIcon, label: 'Informasi', path: `${santriProfileBase}/informasi` },
         { icon: BookOpen, label: 'Akademik', path: `${santriProfileBase}/akademik` }
       ]
     },
@@ -562,7 +562,7 @@ const Layout = ({ children }: LayoutProps) => {
     
     // If user is santri and on dashboard (/), redirect to their profile
     if (authUser.role === 'santri' && authUser.santriId && location.pathname === '/') {
-      navigate(`/santri/profile/${authUser.santriId}/ringkasan`, { replace: true });
+      navigate(`/santri/profile/${authUser.santriId}/informasi`, { replace: true });
       return;
     }
   }, [authUser, location.pathname, authLoading, navigate]);

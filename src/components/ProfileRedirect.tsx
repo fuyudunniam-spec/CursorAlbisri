@@ -12,7 +12,7 @@ const ProfileRedirect = () => {
     if (santriId) {
       // Map old tab names to new routes (including legacy names for backward compatibility)
       const tabMap: { [key: string]: string } = {
-        'ringkasan': 'ringkasan',
+        'ringkasan': 'informasi',    // Redirect old ringkasan to informasi
         'informasi': 'informasi',
         'academic': 'akademik',      // Legacy: academic -> akademik
         'akademik': 'akademik',
@@ -24,7 +24,7 @@ const ProfileRedirect = () => {
         'layanan': 'layanan',
       };
       
-      const route = tab && tabMap[tab] ? tabMap[tab] : 'ringkasan';
+      const route = tab && tabMap[tab] ? tabMap[tab] : 'informasi';
       navigate(`/santri/profile/${santriId}/${route}`, { replace: true });
     } else {
       // If no santriId, redirect to santri list

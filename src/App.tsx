@@ -26,7 +26,6 @@ import SantriAccountManagement from "./pages/SantriAccountManagement";
 import ChangePassword from "./pages/ChangePassword";
 import ProfileLayout from "./components/ProfileLayout";
 import ProfileRedirect from "./components/ProfileRedirect";
-import RingkasanPage from "./pages/santri/RingkasanPage";
 import InformasiPage from "./pages/santri/InformasiPage";
 import AkademikPage from "./pages/santri/AkademikPage";
 import KeuanganPage from "./pages/santri/KeuanganPage";
@@ -362,8 +361,7 @@ const App = () => (
                 <ProfileLayout />
               </Layout>
             }>
-              <Route index element={<RingkasanPage />} />
-              <Route path="ringkasan" element={<RingkasanPage />} />
+              <Route index element={<InformasiPage />} />
               <Route path="informasi" element={<InformasiPage />} />
               <Route path="akademik" element={<AkademikPage />} />
               <Route path="keuangan" element={<KeuanganPage />} />
