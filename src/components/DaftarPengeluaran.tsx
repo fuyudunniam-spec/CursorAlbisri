@@ -61,14 +61,45 @@ const DaftarPengeluaran: React.FC = () => {
         .select(`
           *,
           akun_kas:akun_kas_id(nama),
-          rincian_pengeluaran(*)
+          rincian_pengeluaran(*),
+          alokasi_pengeluaran_santri(
+            id,
+            santri_id,
+            nominal_alokasi,
+            jenis_bantuan,
+            periode,
+            keterangan,
+            santri:santri_id(
+              id,
+              nama_lengkap,
+              nisn,
+              id_santri
+            )
+          )
         `)
         .eq('jenis_transaksi', 'Pengeluaran')
         .order('tanggal', { ascending: false });
       
       if (error) throw error;
-      // Filter hanya pengeluaran
-      const pengeluaranData = result.filter(item => item.jenis_transaksi === 'Pengeluaran');
+      // Filter hanya pengeluaran dan map alokasi_santri
+      const pengeluaranData = result
+        .filter(item => item.jenis_transaksi === 'Pengeluaran')
+        .map(item => {
+          const alokasiSantri = item.alokasi_pengeluaran_santri || [];
+          // Debug log untuk melihat apakah data alokasi ter-fetch
+          if (alokasiSantri.length > 0) {
+            console.log('[DaftarPengeluaran] Found alokasi santri:', {
+              keuangan_id: item.id,
+              kategori: item.kategori,
+              jumlah_alokasi: alokasiSantri.length,
+              alokasi: alokasiSantri
+            });
+          }
+          return {
+            ...item,
+            alokasi_santri: alokasiSantri
+          };
+        });
       setData(pengeluaranData);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -134,8 +165,68 @@ const DaftarPengeluaran: React.FC = () => {
     return new Date(dateString).toLocaleDateString('id-ID');
   };
 
-  const handleViewDetail = (item: KeuanganWithDetails) => {
-    setSelectedItem(item);
+  const handleViewDetail = async (item: KeuanganWithDetails) => {
+    // Selalu fetch alokasi santri secara terpisah untuk memastikan data ter-update
+    // karena mungkin ada masalah dengan nested query di Supabase
+    let alokasiSantri: any[] = [];
+    
+    try {
+      // Fetch alokasi santri secara terpisah untuk kategori yang seharusnya punya alokasi
+      if (item.kategori === 'Pendidikan Formal' || 
+          item.kategori === 'Bantuan Langsung Yayasan' ||
+          item.kategori === 'Operasional dan Konsumsi Santri') {
+        const { data: alokasiData, error: alokasiError } = await supabase
+          .from('alokasi_pengeluaran_santri')
+          .select(`
+            id,
+            santri_id,
+            nominal_alokasi,
+            jenis_bantuan,
+            periode,
+            keterangan,
+            santri:santri_id(
+              id,
+              nama_lengkap,
+              nisn,
+              id_santri
+            )
+          `)
+          .eq('keuangan_id', item.id);
+        
+        if (!alokasiError && alokasiData) {
+          alokasiSantri = alokasiData;
+          console.log('[DaftarPengeluaran] Fetched alokasi santri:', {
+            keuangan_id: item.id,
+            kategori: item.kategori,
+            jumlah: alokasiSantri.length,
+            data: alokasiSantri
+          });
+        } else if (alokasiError) {
+          console.error('[DaftarPengeluaran] Error fetching alokasi santri:', alokasiError);
+        }
+      } else {
+        // Untuk kategori lain, gunakan data dari item jika ada
+        alokasiSantri = item.alokasi_santri || [];
+      }
+    } catch (error) {
+      console.error('[DaftarPengeluaran] Error fetching alokasi santri:', error);
+      // Fallback ke data dari item jika error
+      alokasiSantri = item.alokasi_santri || [];
+    }
+    
+    // Debug log untuk melihat data alokasi saat view detail
+    console.log('[DaftarPengeluaran] View detail:', {
+      keuangan_id: item.id,
+      kategori: item.kategori,
+      alokasi_santri: alokasiSantri,
+      alokasi_length: alokasiSantri?.length || 0,
+      original_alokasi: item.alokasi_santri
+    });
+    
+    setSelectedItem({
+      ...item,
+      alokasi_santri: alokasiSantri
+    });
     setShowDetailModal(true);
   };
 
@@ -448,7 +539,24 @@ const DaftarPengeluaran: React.FC = () => {
               )}
 
               {/* Alokasi Santri */}
-              {selectedItem.alokasi_santri && selectedItem.alokasi_santri.length > 0 && (
+              {(() => {
+                const alokasiSantri = selectedItem.alokasi_santri || [];
+                const hasAlokasi = Array.isArray(alokasiSantri) && alokasiSantri.length > 0;
+                
+                // Debug untuk kategori yang seharusnya punya alokasi
+                if ((selectedItem.kategori === 'Pendidikan Formal' || 
+                     selectedItem.kategori === 'Bantuan Langsung Yayasan') && 
+                    !hasAlokasi) {
+                  console.warn('[DaftarPengeluaran] Expected alokasi but not found:', {
+                    keuangan_id: selectedItem.id,
+                    kategori: selectedItem.kategori,
+                    alokasi_santri: alokasiSantri,
+                    alokasi_pengeluaran_santri: (selectedItem as any).alokasi_pengeluaran_santri
+                  });
+                }
+                
+                return hasAlokasi;
+              })() && (
                 <div>
                   <h4 className="text-sm font-medium mb-2">Alokasi Santri</h4>
                   <div className="border rounded-md">
@@ -463,14 +571,14 @@ const DaftarPengeluaran: React.FC = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {selectedItem.alokasi_santri.map((alloc, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{alloc.santri?.nama_lengkap}</TableCell>
-                            <TableCell>{alloc.santri?.nisn}</TableCell>
-                            <TableCell>{alloc.jenis_bantuan}</TableCell>
-                            <TableCell>{alloc.periode}</TableCell>
+                        {(selectedItem.alokasi_santri || []).map((alloc: any, index: number) => (
+                          <TableRow key={alloc.id || index}>
+                            <TableCell>{alloc.santri?.nama_lengkap || 'Tidak Diketahui'}</TableCell>
+                            <TableCell>{alloc.santri?.id_santri || alloc.santri?.nisn || '-'}</TableCell>
+                            <TableCell>{alloc.jenis_bantuan || '-'}</TableCell>
+                            <TableCell>{alloc.periode || '-'}</TableCell>
                             <TableCell className="text-right font-medium">
-                              {formatCurrency(alloc.nominal_alokasi)}
+                              {formatCurrency(alloc.nominal_alokasi || 0)}
                             </TableCell>
                           </TableRow>
                         ))}

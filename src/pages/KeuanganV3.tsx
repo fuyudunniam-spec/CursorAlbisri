@@ -214,7 +214,22 @@ const KeuanganV3: React.FC = () => {
           jenis_alokasi,
           is_pengeluaran_riil,
           *,
-          akun_kas:akun_kas_id(nama, managed_by)
+          akun_kas:akun_kas_id(nama, managed_by),
+          rincian_pengeluaran(*),
+          alokasi_pengeluaran_santri(
+            id,
+            santri_id,
+            nominal_alokasi,
+            jenis_bantuan,
+            periode,
+            keterangan,
+            santri:santri_id(
+              id,
+              nama_lengkap,
+              nisn,
+              id_santri
+            )
+          )
         `)
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
@@ -534,6 +549,11 @@ const KeuanganV3: React.FC = () => {
         // Tidak ada special handling untuk tracking nominal - semua transaksi di tabel keuangan adalah uang nyata
         const displayCategory = transaction.kategori || 'Lainnya';
         
+        // Map alokasi_pengeluaran_santri ke alokasi_santri untuk kompatibilitas
+        const alokasiSantri = transaction.alokasi_pengeluaran_santri || [];
+        // Map rincian_pengeluaran ke rincian_items untuk kompatibilitas dengan TransactionDetailModal
+        const rincianItems = transaction.rincian_pengeluaran || transaction.rincian_items || [];
+        
         return {
           ...transaction,
           akun_kas_nama: (transaction.akun_kas?.nama || transaction.akun_kas_nama || '') || 'Kas Utama',
@@ -542,7 +562,9 @@ const KeuanganV3: React.FC = () => {
           display_description: cleanedDeskripsi || (
             (transaction.jenis_transaksi === 'Pemasukan' ? 'Pemasukan' : 'Pengeluaran') +
             (transaction.kategori ? ` - ${transaction.kategori}` : '')
-          )
+          ),
+          alokasi_santri: alokasiSantri,
+          rincian_items: rincianItems
         };
       });
       
@@ -1011,8 +1033,51 @@ const KeuanganV3: React.FC = () => {
     loadChartData(undefined);
   };
 
-  const handleViewDetail = (transaction: Transaction) => {
-    setSelectedTransaction(transaction);
+  const handleViewDetail = async (transaction: Transaction) => {
+    // Jika alokasi_santri tidak ada atau kosong, fetch ulang dari database
+    let alokasiSantri = transaction.alokasi_santri || [];
+    
+    // Fetch alokasi santri secara terpisah untuk kategori yang seharusnya punya alokasi
+    if ((transaction.kategori === 'Pendidikan Formal' || 
+         transaction.kategori === 'Bantuan Langsung Yayasan' ||
+         transaction.kategori === 'Operasional dan Konsumsi Santri') && 
+        (!alokasiSantri || alokasiSantri.length === 0)) {
+      try {
+        const { data: alokasiData, error: alokasiError } = await supabase
+          .from('alokasi_pengeluaran_santri')
+          .select(`
+            id,
+            santri_id,
+            nominal_alokasi,
+            jenis_bantuan,
+            periode,
+            keterangan,
+            santri:santri_id(
+              id,
+              nama_lengkap,
+              nisn,
+              id_santri
+            )
+          `)
+          .eq('keuangan_id', transaction.id);
+        
+        if (!alokasiError && alokasiData) {
+          alokasiSantri = alokasiData;
+          console.log('[KeuanganV3] Fetched alokasi santri:', {
+            keuangan_id: transaction.id,
+            kategori: transaction.kategori,
+            jumlah: alokasiSantri.length
+          });
+        }
+      } catch (error) {
+        console.error('[KeuanganV3] Error fetching alokasi santri:', error);
+      }
+    }
+    
+    setSelectedTransaction({
+      ...transaction,
+      alokasi_santri: alokasiSantri
+    });
     setShowTransactionDetail(true);
   };
 

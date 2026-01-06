@@ -10,6 +10,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
+import { addKeuanganKoperasiTransaction } from '@/services/keuanganKoperasi.service';
+import { AkunKasService } from '@/services/akunKas.service';
 
 interface PembayaranHutangPenjualanDialogProps {
   open: boolean;
@@ -65,7 +67,7 @@ export default function PembayaranHutangPenjualanDialog({
       const totalBayarBaru = Number(penjualan.total_bayar || 0) + jumlahBayar;
 
       // Insert payment record
-      const { error: paymentError } = await supabase
+      const { data: paymentRecord, error: paymentError } = await supabase
         .from('kop_pembayaran_hutang_penjualan')
         .insert({
           penjualan_id: penjualan.id,
@@ -75,7 +77,9 @@ export default function PembayaranHutangPenjualanDialog({
           sisa_hutang_setelah: sisaHutangSetelah,
           catatan: data.catatan,
           created_by: user?.id,
-        });
+        })
+        .select()
+        .single();
 
       if (paymentError) throw paymentError;
 
@@ -91,12 +95,96 @@ export default function PembayaranHutangPenjualanDialog({
         .eq('id', penjualan.id);
 
       if (updateError) throw updateError;
+
+      // Otomatis buat entri keuangan koperasi untuk pembayaran hutang ini
+      try {
+        // Cek apakah sudah ada entri keuangan untuk pembayaran ini (menghindari duplikasi)
+        const { data: existingKeuangan } = await supabase
+          .from('keuangan')
+          .select('id')
+          .eq('source_module', 'koperasi')
+          .eq('source_id', paymentRecord.id)
+          .eq('auto_posted', true)
+          .maybeSingle();
+
+        if (!existingKeuangan) {
+          // Get akun kas koperasi default
+          const accounts = await AkunKasService.getAll();
+          const koperasiAccounts = accounts.filter(acc => 
+            acc.status === 'aktif' && 
+            (acc.managed_by === 'koperasi' || acc.nama?.toLowerCase().includes('koperasi'))
+          );
+          
+          // Prioritaskan "Kas Koperasi", jika tidak ada gunakan akun pertama
+          const akunKasKoperasi = koperasiAccounts.find(acc => acc.nama === 'Kas Koperasi') 
+            || koperasiAccounts[0];
+
+          if (!akunKasKoperasi) {
+            console.warn('Tidak ada akun kas koperasi yang ditemukan, entri keuangan tidak dibuat');
+          } else {
+            // Buat entri keuangan koperasi
+            await addKeuanganKoperasiTransaction({
+              tanggal: data.tanggal_bayar,
+              jenis_transaksi: 'Pemasukan',
+              kategori: 'Penjualan',
+              sub_kategori: 'Pembayaran Hutang Penjualan',
+              jumlah: jumlahBayar,
+              deskripsi: `Pembayaran hutang penjualan - No. Struk: ${penjualan.nomor_struk || penjualan.no_penjualan || penjualan.id}${data.catatan ? ` - ${data.catatan}` : ''}`,
+              penerima_pembayar: penjualan.pembeli_nama || penjualan.pembeli || 'Pelanggan',
+              akun_kas_id: akunKasKoperasi.id,
+              referensi: `Pembayaran Hutang Penjualan #${paymentRecord.id}`,
+              status: 'posted'
+            });
+
+            // Update saldo akun kas
+            try {
+              await supabase.rpc('ensure_akun_kas_saldo_correct_for', {
+                p_akun_id: akunKasKoperasi.id
+              });
+            } catch (saldoError) {
+              // Silent fail - saldo will be recalculated on next transaction
+              if (process.env.NODE_ENV === 'development') {
+                console.warn('Warning ensuring saldo correct:', saldoError);
+              }
+            }
+
+            // Update keuangan entry dengan source_id untuk tracking
+            const { data: keuanganEntry } = await supabase
+              .from('keuangan')
+              .select('id')
+              .eq('source_module', 'koperasi')
+              .eq('referensi', `Pembayaran Hutang Penjualan #${paymentRecord.id}`)
+              .eq('tanggal', data.tanggal_bayar)
+              .eq('jumlah', jumlahBayar)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (keuanganEntry) {
+              await supabase
+                .from('keuangan')
+                .update({
+                  source_id: paymentRecord.id,
+                  auto_posted: true
+                })
+                .eq('id', keuanganEntry.id);
+            }
+          }
+        }
+      } catch (keuanganError) {
+        // Log error tapi jangan gagalkan pembayaran
+        console.error('Error creating keuangan entry:', keuanganError);
+        // Tetap tampilkan warning ke user
+        toast.warning('Pembayaran berhasil dicatat, namun entri keuangan gagal dibuat. Silakan buat manual jika diperlukan.');
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['koperasi-penjualan-list'] });
       queryClient.invalidateQueries({ queryKey: ['koperasi-payment-history-penjualan'] });
       queryClient.invalidateQueries({ queryKey: ['koperasi-penjualan-summary'] });
-      toast.success('Pembayaran berhasil dicatat');
+      queryClient.invalidateQueries({ queryKey: ['keuangan-koperasi'] });
+      queryClient.invalidateQueries({ queryKey: ['keuangan'] });
+      toast.success('Pembayaran berhasil dicatat dan entri keuangan koperasi dibuat');
       onClose();
     },
     onError: (error: any) => {

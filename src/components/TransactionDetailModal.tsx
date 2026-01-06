@@ -246,7 +246,24 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
           )}
 
           {/* Alokasi Santri (if any) */}
-          {transaction.alokasi_santri && transaction.alokasi_santri.length > 0 && (
+          {(() => {
+            const alokasiSantri = transaction.alokasi_santri || [];
+            const hasAlokasi = Array.isArray(alokasiSantri) && alokasiSantri.length > 0;
+            
+            // Debug log untuk melihat data alokasi
+            if ((transaction.kategori === 'Pendidikan Formal' || 
+                 transaction.kategori === 'Bantuan Langsung Yayasan' ||
+                 transaction.kategori === 'Operasional dan Konsumsi Santri') && 
+                !hasAlokasi) {
+              console.warn('[TransactionDetailModal] Expected alokasi but not found:', {
+                keuangan_id: transaction.id,
+                kategori: transaction.kategori,
+                alokasi_santri: alokasiSantri
+              });
+            }
+            
+            return hasAlokasi;
+          })() && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -256,19 +273,22 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {transaction.alokasi_santri.map((alokasi: any, index: number) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                  {(transaction.alokasi_santri || []).map((alokasi: any, index: number) => (
+                    <div key={alokasi.id || index} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
                       <div>
                         <p className="font-medium">{alokasi.santri?.nama_lengkap || 'Santri'}</p>
                         <p className="text-sm text-muted-foreground">
-                          {alokasi.santri?.id_santri || alokasi.santri?.nisn} • {alokasi.jenis_bantuan}
+                          {alokasi.santri?.id_santri || alokasi.santri?.nisn || '-'} {alokasi.jenis_bantuan ? `• ${alokasi.jenis_bantuan}` : ''}
                         </p>
-                        {alokasi.catatan && (
-                          <p className="text-xs text-muted-foreground mt-1">{alokasi.catatan}</p>
+                        {alokasi.periode && (
+                          <p className="text-xs text-muted-foreground mt-1">Periode: {alokasi.periode}</p>
+                        )}
+                        {alokasi.keterangan && (
+                          <p className="text-xs text-muted-foreground mt-1">{alokasi.keterangan}</p>
                         )}
                       </div>
                       <span className="font-semibold text-blue-600">
-                        {formatCurrency(alokasi.nominal_alokasi)}
+                        {formatCurrency(alokasi.nominal_alokasi || 0)}
                       </span>
                     </div>
                   ))}

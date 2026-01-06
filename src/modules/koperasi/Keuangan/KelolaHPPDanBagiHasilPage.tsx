@@ -389,7 +389,10 @@ const KelolaHPPDanBagiHasilPage = () => {
             )
           )
         `)
-        .eq('status_pembayaran', 'lunas'); // Hanya penjualan yang sudah lunas (sama dengan modul penjualan)
+        // PERUBAHAN: Ambil SEMUA penjualan (lunas, hutang, cicilan) karena barang sudah terjual
+        // Status pembayaran tidak mempengaruhi apakah penjualan masuk ke kalkulator HPP
+        // Barang sudah keluar dari stok, jadi harus dihitung di HPP
+        .in('status_pembayaran', ['lunas', 'hutang', 'cicilan']);
       
       // Apply date filter (skip if 'semua')
       if (dateFilter !== 'semua') {

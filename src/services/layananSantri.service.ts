@@ -104,32 +104,21 @@ export interface GenerateLayananPeriodikData {
 export class LayananSantriService {
   /**
    * Get rancangan anggaran untuk periode tertentu
+   * NOTE: Tabel rancangan_anggaran_layanan sudah dihapus, fungsi ini return empty array
    */
   static async getRancanganAnggaran(
     periode?: string,
     pilar_layanan?: PilarLayanan
   ): Promise<RancanganAnggaranLayanan[]> {
     try {
-      let query = supabase
-        .from('rancangan_anggaran_layanan')
-        .select('*')
-        .order('periode', { ascending: false })
-        .order('pilar_layanan', { ascending: true });
-
-      if (periode) {
-        query = query.eq('periode', periode);
-      }
-      if (pilar_layanan) {
-        query = query.eq('pilar_layanan', pilar_layanan);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      return data || [];
+      // Tabel rancangan_anggaran_layanan sudah dihapus, return empty array
+      // TODO: Implement rancangan anggaran dengan struktur baru jika diperlukan
+      console.warn('getRancanganAnggaran: Tabel rancangan_anggaran_layanan sudah dihapus, returning empty array');
+      return [];
     } catch (error) {
       console.error('Error getting rancangan anggaran:', error);
-      throw error;
+      // Return empty array instead of throwing to prevent UI errors
+      return [];
     }
   }
 
@@ -1084,74 +1073,11 @@ export class LayananSantriService {
         });
       });
 
-      // REVISI: Ambil langsung dari transaksi keuangan untuk "Bantuan Langsung" dan "Pendidikan Formal"
-      // yang punya santri_id langsung di tabel keuangan
-      const { data: keuanganData, error: keuanganError } = await supabase
-        .from('keuangan')
-        .select('id, santri_id, kategori, jumlah, tanggal')
-        .eq('jenis_transaksi', 'Pengeluaran')
-        .eq('status', 'posted')
-        .eq('ledger', 'UMUM')
-        .not('santri_id', 'is', null)
-        .in('kategori', ['Bantuan Langsung Yayasan', 'Pendidikan Formal'])
-        .gte('tanggal', startDate.toISOString().split('T')[0])
-        .lte('tanggal', endDate.toISOString().split('T')[0]);
-
-      if (!keuanganError && keuanganData) {
-        keuanganData.forEach((tx: any) => {
-          const santriId = tx.santri_id;
-          if (!summaryMap.has(santriId)) return;
-
-          const summary = summaryMap.get(santriId)!;
-          const nilai = Number(tx.jumlah) || 0;
-
-          if (tx.kategori === 'Bantuan Langsung Yayasan') {
-            summary.bantuan_langsung += nilai;
-          } else if (tx.kategori === 'Pendidikan Formal') {
-            summary.pendidikan_formal += nilai;
-          }
-        });
-      }
-
-      // REVISI: Juga ambil dari alokasi_pengeluaran_santri untuk transaksi lama
-      // yang mungkin belum punya santri_id di tabel keuangan
-      const { data: alokasiData, error: alokasiError } = await supabase
-        .from('alokasi_pengeluaran_santri')
-        .select(`
-          santri_id,
-          nominal_alokasi,
-          keuangan:keuangan_id(
-            kategori,
-            tanggal
-          )
-        `)
-        .gte('created_at', startDate.toISOString())
-        .lte('created_at', endDate.toISOString());
-
-      if (!alokasiError && alokasiData) {
-        alokasiData.forEach((alokasi: any) => {
-          const santriId = alokasi.santri_id;
-          if (!summaryMap.has(santriId)) return;
-
-          const kategori = alokasi.keuangan?.kategori;
-          const txDate = alokasi.keuangan?.tanggal;
-          
-          // Pastikan tanggal transaksi masuk dalam periode
-          if (txDate) {
-            const txDateObj = new Date(txDate);
-            if (txDateObj >= startDate && txDateObj <= endDate) {
-              const nilai = Number(alokasi.nominal_alokasi) || 0;
-              const summary = summaryMap.get(santriId)!;
-
-              if (kategori === 'Bantuan Langsung Yayasan') {
-                summary.bantuan_langsung += nilai;
-              } else if (kategori === 'Pendidikan Formal') {
-                summary.pendidikan_formal += nilai;
-              }
-            }
-          }
-        });
-      }
+      // REVISI: Hanya ambil dari ledger_layanan_santri sebagai single source of truth
+      // Tidak perlu ambil dari keuangan atau alokasi_pengeluaran_santri karena:
+      // 1. Ledger_layanan_santri sudah di-populate dari keuangan/alokasi saat transaksi dibuat
+      // 2. Mengambil dari multiple sources bisa menyebabkan duplikasi
+      // 3. Ledger_layanan_santri adalah source of truth untuk realisasi layanan
 
       // Get all ledger entries for the period
       const { data: ledgerEntries, error: ledgerError } = await supabase

@@ -25,7 +25,9 @@ import { cn } from '@/lib/utils';
 import { supabase } from '../integrations/supabase/client';
 import { AkunKasService, AkunKas } from '../services/akunKas.service';
 import { AlokasiPengeluaranService } from '../services/alokasiPengeluaran.service';
+import { MasterDataKeuanganService, type MasterKategoriPengeluaran, type MasterSubKategoriPengeluaran } from '../services/masterDataKeuangan.service';
 import { toast } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
 
 interface CreateKeuanganWithDetailsData {
   tanggal: string;
@@ -309,21 +311,31 @@ const createKeuanganWithDetails = async (data: CreateKeuanganWithDetailsData) =>
       
       // Create Ledger Layanan Santri untuk "Bantuan Langsung Yayasan" dan "Pendidikan Formal"
       if (config.createLayananSantri && data.kategori === 'Bantuan Langsung Yayasan' && alokasiData.length > 0) {
+        // Parse periode from tanggal transaksi (format: YYYY-MM)
+        const transaksiDate = new Date(data.tanggal);
+        const periode = `${transaksiDate.getFullYear()}-${String(transaksiDate.getMonth() + 1).padStart(2, '0')}`;
+        
+        // Delete existing entries for this keuangan_id to avoid duplicates
+        const { error: deleteError } = await supabase
+          .from('ledger_layanan_santri')
+          .delete()
+          .eq('referensi_keuangan_id', keuangan.id)
+          .eq('pilar_layanan', 'bantuan_langsung')
+          .eq('sumber_perhitungan', 'bantuan_langsung');
+        
+        if (deleteError) {
+          console.error('[ERROR] Failed to delete existing Bantuan Langsung entries:', deleteError);
+        }
+        
         // Create ledger entries for each allocation
-        const ledgerEntries = alokasiData.map(alokasi => {
-          // Parse periode from tanggal transaksi (format: YYYY-MM)
-          const transaksiDate = new Date(data.tanggal);
-          const periode = `${transaksiDate.getFullYear()}-${String(transaksiDate.getMonth() + 1).padStart(2, '0')}`;
-          
-          return {
-            santri_id: alokasi.santri_id,
-            periode: periode,
-            pilar_layanan: 'bantuan_langsung' as const,
-            nilai_layanan: alokasi.nominal_alokasi || 0,
-            sumber_perhitungan: 'bantuan_langsung' as const,
-            referensi_keuangan_id: keuangan.id,
-          };
-        });
+        const ledgerEntries = alokasiData.map(alokasi => ({
+          santri_id: alokasi.santri_id,
+          periode: periode,
+          pilar_layanan: 'bantuan_langsung' as const,
+          nilai_layanan: alokasi.nominal_alokasi || 0,
+          sumber_perhitungan: 'bantuan_langsung' as const,
+          referensi_keuangan_id: keuangan.id,
+        }));
         
         const { error: ledgerError } = await supabase
           .from('ledger_layanan_santri')
@@ -435,6 +447,11 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
   // Options
   const [akunKasOptions, setAkunKasOptions] = useState<AkunKas[]>([]);
   const [santriOptions, setSantriOptions] = useState<SantriOption[]>([]);
+  
+  // Master data keuangan
+  const [kategoriOptions, setKategoriOptions] = useState<MasterKategoriPengeluaran[]>([]);
+  const [subKategoriOptions, setSubKategoriOptions] = useState<MasterSubKategoriPengeluaran[]>([]);
+  const [selectedKategoriId, setSelectedKategoriId] = useState<string>('');
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -512,6 +529,128 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
     }
   }, [akunKasId, akunKasOptions]);
 
+  // Auto-select santri berdasarkan mapping di master data
+  const [lastMappingCheck, setLastMappingCheck] = useState<{ kategori: string; subKategori: string } | null>(null);
+  const [isManualSelection, setIsManualSelection] = useState(false);
+  
+  useEffect(() => {
+    const loadSantriMapping = async () => {
+      if (!kategori) {
+        setLastMappingCheck(null);
+        setIsManualSelection(false);
+        return;
+      }
+
+      const currentCheck = { kategori, subKategori: subKategori || '' };
+      
+      // Jika kategori atau sub kategori berubah, reset manual selection flag
+      if (lastMappingCheck && 
+          (lastMappingCheck.kategori !== currentCheck.kategori || 
+           lastMappingCheck.subKategori !== currentCheck.subKategori)) {
+        setIsManualSelection(false);
+        // Clear alokasi santri saat kategori/subKategori berubah
+        setAlokasiSantri([]);
+        setSelectedSantriIds([]);
+      }
+
+      // Skip jika sudah pernah check mapping untuk kombinasi kategori+subKategori yang sama
+      if (lastMappingCheck && 
+          lastMappingCheck.kategori === currentCheck.kategori && 
+          lastMappingCheck.subKategori === currentCheck.subKategori) {
+        return;
+      }
+
+      // Skip jika user sudah memilih santri manual
+      if (isManualSelection && alokasiSantri.length > 0) {
+        return;
+      }
+
+      try {
+        const mappingResult = await MasterDataKeuanganService.getMappingWithPriority(
+          kategori,
+          subKategori || undefined
+        );
+
+        setLastMappingCheck(currentCheck);
+
+        if (!mappingResult.mapping || !mappingResult.mapping.aktif) {
+          return;
+        }
+
+        const mapping = mappingResult.mapping;
+
+        // Jika tipe = 'tidak_dialokasikan', tidak perlu auto-select
+        if (mapping.tipe_alokasi === 'tidak_dialokasikan') {
+          return;
+        }
+
+        // Jika tipe = 'seluruh_binaan_mukim', load semua santri binaan mukim
+        if (mapping.tipe_alokasi === 'seluruh_binaan_mukim') {
+          const { data: santriBinaanMukim, error } = await supabase
+            .from('santri')
+            .select('id, nama_lengkap, id_santri')
+            .eq('status_santri', 'Aktif')
+            .or('kategori.ilike.%binaan%mukim%,kategori.ilike.%mukim%binaan%');
+
+          if (error) throw error;
+
+          if (santriBinaanMukim && santriBinaanMukim.length > 0) {
+            const newAllocations: AlokasiSantri[] = santriBinaanMukim.map((santri) => ({
+              id: `alloc-${Date.now()}-${santri.id}`,
+              santri_id: santri.id,
+              nama_lengkap: santri.nama_lengkap,
+              id_santri: santri.id_santri || '',
+              nominal_alokasi: 0,
+              persentase_alokasi: 0,
+              jenis_bantuan: subKategori || kategori,
+              periode: new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
+              keterangan: '',
+            }));
+
+            setAlokasiSantri(newAllocations);
+            setSelectedSantriIds(santriBinaanMukim.map(s => s.id));
+            toast.success(`${santriBinaanMukim.length} santri binaan mukim otomatis dipilih`);
+          }
+        }
+
+        // Jika tipe = 'pilih_santri', load santri dari mapping
+        if (mapping.tipe_alokasi === 'pilih_santri' && 'santri_list' in mapping && mapping.santri_list) {
+          const santriList = mapping.santri_list;
+          if (santriList.length > 0) {
+            const newAllocations: AlokasiSantri[] = santriList.map((item) => {
+              const santri = santriOptions.find(s => s.id === item.santri_id);
+              return {
+                id: `alloc-${Date.now()}-${item.santri_id}`,
+                santri_id: item.santri_id,
+                nama_lengkap: item.santri_nama,
+                id_santri: item.santri_id_santri || '',
+                nominal_alokasi: 0,
+                persentase_alokasi: 0,
+                jenis_bantuan: subKategori || kategori,
+                periode: new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
+                keterangan: '',
+              };
+            });
+
+            setAlokasiSantri(newAllocations);
+            setSelectedSantriIds(santriList.map(item => item.santri_id));
+            toast.success(`${santriList.length} santri otomatis dipilih berdasarkan mapping`);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading santri mapping:', error);
+        // Jangan tampilkan error toast, karena ini opsional
+      }
+    };
+
+    // Delay sedikit untuk menghindari race condition
+    const timeoutId = setTimeout(() => {
+      loadSantriMapping();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [kategori, subKategori, santriOptions]);
+
   // Auto-update jenis alokasi saat kategori berubah
   useEffect(() => {
     if (kategori) {
@@ -560,7 +699,7 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
     }
   }, [kategori, jenisAlokasi, subKategori]);
 
-  // Helper function untuk mendapatkan sub kategori options
+  // Helper function untuk mendapatkan sub kategori options dari master data
   interface SubKategoriOption {
     value: string;
     label: string;
@@ -568,31 +707,19 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
   }
   
   const getSubKategoriOptions = (kategoriValue: string): SubKategoriOption[] => {
-    const baseOptions: Record<string, SubKategoriOption[]> = {
-      'Operasional Yayasan': [
-        { value: 'Gaji & Honor', label: 'Gaji & Honor' },
-        { value: 'Utilitas', label: 'Utilitas' },
-        { value: 'Maintenance', label: 'Maintenance' },
-        { value: 'Administrasi', label: 'Administrasi' },
-        { value: 'Lain-lain', label: 'Lain-lain', isCustom: true }
-      ],
-      'Operasional dan Konsumsi Santri': [
-        { value: 'Konsumsi', label: 'Konsumsi' },
-        { value: 'Operasional', label: 'Operasional' },
-        { value: 'Lain-lain', label: 'Lain-lain', isCustom: true }
-      ],
-      'Pembangunan': [
-        { value: 'Material', label: 'Material' },
-        { value: 'Gaji Karyawan', label: 'Gaji Karyawan' },
-        { value: 'Lain-lain', label: 'Lain-lain', isCustom: true }
-      ]
-    };
-    
-    if (baseOptions[kategoriValue]) {
-      return baseOptions[kategoriValue];
+    // Jika ada sub kategori dari master data, gunakan itu
+    if (subKategoriOptions.length > 0) {
+      const options: SubKategoriOption[] = subKategoriOptions
+        .filter(sub => sub.aktif)
+        .map(sub => ({ value: sub.nama, label: sub.nama }));
+      
+      // Tambahkan opsi custom untuk menambah sub kategori baru
+      options.push({ value: '', label: 'Tambah Sub Kategori Baru...', isCustom: true });
+      
+      return options;
     }
     
-    // Untuk kategori lain, ambil dari historical + opsi custom
+    // Fallback: ambil dari historical jika master data belum loaded
     const options: SubKategoriOption[] = historicalSubKategori
       .filter(sub => sub && sub.trim() !== '')
       .map(sub => ({ value: sub, label: sub }));
@@ -637,6 +764,55 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
     
     loadHistoricalSubKategori();
   }, [kategori]);
+
+  // Load kategori dari master data
+  const { data: kategoriList } = useQuery({
+    queryKey: ['master-kategori-pengeluaran-form'],
+    queryFn: () => MasterDataKeuanganService.getKategoriPengeluaran({ 
+      jenis: 'Pengeluaran',
+      aktifOnly: true 
+    }),
+  });
+
+  // Load sub kategori berdasarkan kategori yang dipilih
+  const { data: subKategoriList } = useQuery({
+    queryKey: ['master-sub-kategori-form', selectedKategoriId],
+    queryFn: () => {
+      if (!selectedKategoriId) return Promise.resolve([]);
+      return MasterDataKeuanganService.getSubKategoriByKategori(selectedKategoriId);
+    },
+    enabled: !!selectedKategoriId,
+  });
+
+  // Update kategori options saat data loaded
+  useEffect(() => {
+    if (kategoriList) {
+      setKategoriOptions(kategoriList);
+    }
+  }, [kategoriList]);
+
+  // Update sub kategori options saat data loaded
+  useEffect(() => {
+    if (subKategoriList) {
+      setSubKategoriOptions(subKategoriList);
+    } else {
+      setSubKategoriOptions([]);
+    }
+  }, [subKategoriList]);
+
+  // Update selectedKategoriId saat kategori berubah
+  useEffect(() => {
+    if (kategori && kategoriList) {
+      const foundKategori = kategoriList.find(k => k.nama === kategori);
+      if (foundKategori) {
+        setSelectedKategoriId(foundKategori.id);
+      } else {
+        setSelectedKategoriId('');
+      }
+    } else {
+      setSelectedKategoriId('');
+    }
+  }, [kategori, kategoriList]);
 
   // Load initial data
   useEffect(() => {
@@ -714,6 +890,9 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
     const santri = santriOptions.find(s => s.id === santriId);
     if (!santri || alokasiSantri.find(a => a.santri_id === santriId)) return;
 
+    // Mark sebagai manual selection
+    setIsManualSelection(true);
+
     const newAllocation: AlokasiSantri = {
       id: `alloc-${Date.now()}`,
       santri_id: santriId,
@@ -732,6 +911,9 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
   };
 
   const updateAlokasiSantri = (id: string, field: keyof AlokasiSantri, value: any) => {
+    // Mark sebagai manual selection saat user mengubah alokasi
+    setIsManualSelection(true);
+    
     setAlokasiSantri(items =>
       items.map(item => {
         if (item.id === id) {
@@ -762,6 +944,9 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
   };
 
   const applyBatchNominal = () => {
+    // Mark sebagai manual selection saat user mengubah nominal
+    setIsManualSelection(true);
+    
     const nominalValue = parseFloat(batchNominal.replace(/[^\d]/g, '')) || 0;
     if (nominalValue <= 0) {
       toast.error('Nominal harus lebih dari 0');
@@ -785,6 +970,9 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
   };
 
   const removeAlokasiSantri = (id: string) => {
+    // Mark sebagai manual selection saat user menghapus santri
+    setIsManualSelection(true);
+    
     const allocation = alokasiSantri.find(a => a.id === id);
     if (allocation) {
       setSelectedSantriIds(ids => ids.filter(id => id !== allocation.santri_id));
@@ -794,6 +982,9 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
 
   // Auto-generate alokasi dari rincian item (detail per jenis bantuan)
   const autoGenerateAllocationFromRincian = () => {
+    // Mark sebagai manual selection saat user menggunakan auto-generate
+    setIsManualSelection(true);
+    
     if (rincianItems.length === 0) {
       toast.error('Isi rincian item dulu');
       return;
@@ -1064,9 +1255,14 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
         finalAlokasiSantri = [];
       }
 
-      // REVISI v2: Determine jenis_alokasi - tidak ada lagi overhead auto-generate
+      // REVISI v3: Determine jenis_alokasi berdasarkan config
+      // Support untuk overhead, langsung, dan tidak dialokasikan
       let finalJenisAlokasi = jenisAlokasi;
-      if (config) {
+      if (config && config.defaultJenisAlokasi !== undefined) {
+        // Gunakan defaultJenisAlokasi dari config jika tersedia
+        finalJenisAlokasi = config.defaultJenisAlokasi;
+      } else if (config) {
+        // Fallback: jika tidak ada defaultJenisAlokasi, gunakan logika lama
         if (!config.perluPilihSantri) {
           finalJenisAlokasi = ''; // Tidak ada alokasi
         } else {
@@ -1125,6 +1321,8 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
       setPeriodeDari('');
       setPeriodeSampai('');
       setNominalPerBulan('');
+      setIsManualSelection(false);
+      setLastMappingCheck(null);
 
       toast.success('Pengeluaran berhasil disimpan');
       onSuccess?.();
@@ -1291,29 +1489,47 @@ const FormPengeluaranRinci: React.FC<FormPengeluaranRinciProps> = ({ onSuccess }
             </div>
             <div className="space-y-2">
               <Label htmlFor="kategori">Kategori *</Label>
-              <Select value={kategori} onValueChange={setKategori}>
+              <Select 
+                value={kategori} 
+                onValueChange={(value) => {
+                  setKategori(value);
+                  // Reset sub kategori saat kategori berubah
+                  setSubKategori('');
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Pilih kategori" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Pendidikan Pesantren">
-                    Pendidikan Pesantren
-                  </SelectItem>
-                  <SelectItem value="Pendidikan Formal">
-                    Pendidikan Formal
-                  </SelectItem>
-                  <SelectItem value="Operasional dan Konsumsi Santri">
-                    Operasional & Konsumsi Santri
-                  </SelectItem>
-                  <SelectItem value="Bantuan Langsung Yayasan">
-                    Bantuan Langsung Yayasan
-                  </SelectItem>
-                  <SelectItem value="Operasional Yayasan">
-                    Operasional Yayasan
-                  </SelectItem>
-                  <SelectItem value="Pembangunan">
-                    Pembangunan
-                  </SelectItem>
+                  {kategoriOptions.length > 0 ? (
+                    kategoriOptions.map((kat) => (
+                      <SelectItem key={kat.id} value={kat.nama}>
+                        {kat.nama}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    // Fallback untuk backward compatibility
+                    <>
+                      <SelectItem value="Pendidikan Pesantren">
+                        Pendidikan Pesantren
+                      </SelectItem>
+                      <SelectItem value="Pendidikan Formal">
+                        Pendidikan Formal
+                      </SelectItem>
+                      <SelectItem value="Operasional dan Konsumsi Santri">
+                        Operasional & Konsumsi Santri
+                      </SelectItem>
+                      <SelectItem value="Bantuan Langsung Yayasan">
+                        Bantuan Langsung Yayasan
+                      </SelectItem>
+                      <SelectItem value="Operasional Yayasan">
+                        Operasional Yayasan
+                      </SelectItem>
+                      <SelectItem value="Pembangunan">
+                        Pembangunan
+                      </SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
               {kategori && (() => {

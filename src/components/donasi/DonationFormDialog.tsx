@@ -15,13 +15,6 @@ import DonorSearch from '@/components/donor/DonorSearch';
 import DonorFormDialog from '@/components/donor/DonorFormDialog';
 import { DonorService, type DonorSearchResult } from '@/services/donor.service';
 import SantriSearch from '@/components/santri/SantriSearch';
-import { 
-  RancanganPelayananService, 
-  type RancanganPelayanan,
-  type RancanganPilar,
-  type PilarPelayanan,
-  PILAR_PELAYANAN_CONFIG
-} from '@/services/rancanganPelayanan.service';
 import { SemesterSyncService } from '@/services/semesterSync.service';
 import { AkademikSemesterService, type Semester } from '@/services/akademikSemester.service';
 import { Progress } from '@/components/ui/progress';
@@ -97,8 +90,6 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
   
   // Legacy state (untuk backward compatibility dengan kategori lain)
   const [selectedSantri, setSelectedSantri] = useState<any>(null);
-  const [rancanganList, setRancanganList] = useState<RancanganPelayanan[]>([]);
-  const [selectedRancanganId, setSelectedRancanganId] = useState<string>('');
   
   // State untuk batch dan kebutuhan periode - DINONAKTIFKAN (modul kebutuhan layanan santri dinonaktifkan)
   // const [batchList, setBatchList] = useState<any[]>([]);
@@ -167,10 +158,6 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
             .then(({ data: santri }) => {
               if (santri) {
                 setSelectedSantri(santri);
-                if (editingDonation.target_rancangan_id) {
-                  setSelectedRancanganId(editingDonation.target_rancangan_id);
-                  loadRancanganBySantri(santri.id);
-                }
               }
             });
         }
@@ -325,29 +312,6 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
     }
   };
 
-  const loadRancanganBySantri = async (santriId: string) => {
-    try {
-      const data = await RancanganPelayananService.getAllRancangan();
-      // Filter rancangan untuk santri yang dipilih dan status aktif
-      const filtered = data.filter(
-        r => r.santri_id === santriId && r.status === 'aktif'
-      );
-      
-      setRancanganList(filtered);
-      
-      // Auto-select first rancangan if available (legacy - untuk backward compatibility)
-      if (filtered.length > 0) {
-        setSelectedRancanganId(filtered[0].id);
-      } else {
-        setSelectedRancanganId('');
-      }
-    } catch (error) {
-      console.error('Error loading rancangan:', error);
-      toast.error('Gagal memuat kebutuhan layanan');
-      setRancanganList([]);
-      setSelectedRancanganId('');
-    }
-  };
 
   // Auto-load akun kas saat pilar dipilih
   useEffect(() => {
@@ -420,8 +384,6 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
     setSelectedDonor(null);
     setManualMode(false);
     setSelectedSantri(null);
-    setRancanganList([]);
-    setSelectedRancanganId('');
     
     // Reset state untuk batch - DINONAKTIFKAN
     // setSelectedBatchId('');
@@ -597,12 +559,6 @@ const DonationFormDialog: React.FC<DonationFormDialogProps> = ({
           if (!selectedSantri) {
             setValidationErrors({ santri: 'Pilih santri untuk kategori Orang Tua Asuh Santri' });
             toast.error('Pilih santri terlebih dahulu');
-            setLoading(false);
-            return;
-          }
-          if (!selectedRancanganId) {
-            setValidationErrors({ rancangan: 'Pilih kebutuhan layanan untuk santri ini' });
-            toast.error('Pilih kebutuhan layanan terlebih dahulu');
             setLoading(false);
             return;
           }

@@ -76,7 +76,14 @@ const SkemaBagiHasilPage = () => {
 
   const { data: skemaList, isLoading } = useQuery({
     queryKey: ['skema-bagi-hasil'],
-    queryFn: () => koperasiService.getSkemaBagiHasil(),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('kop_skema_bagi_hasil')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as SkemaBagiHasil[];
+    },
   });
 
   const { data: kategoriList } = useQuery({
@@ -92,7 +99,15 @@ const SkemaBagiHasilPage = () => {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => koperasiService.createSkemaBagiHasil(data),
+    mutationFn: async (data: any) => {
+      const { data: result, error } = await supabase
+        .from('kop_skema_bagi_hasil')
+        .insert({ ...data, is_active: true })
+        .select()
+        .single();
+      if (error) throw error;
+      return result;
+    },
     onSuccess: () => {
       toast.success('Skema bagi hasil berhasil dibuat');
       queryClient.invalidateQueries({ queryKey: ['skema-bagi-hasil'] });
@@ -105,8 +120,16 @@ const SkemaBagiHasilPage = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) =>
-      koperasiService.updateSkemaBagiHasil(id, data),
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      const { data: result, error } = await supabase
+        .from('kop_skema_bagi_hasil')
+        .update(data)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return result;
+    },
     onSuccess: () => {
       toast.success('Skema bagi hasil berhasil diupdate');
       queryClient.invalidateQueries({ queryKey: ['skema-bagi-hasil'] });
@@ -120,7 +143,13 @@ const SkemaBagiHasilPage = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => koperasiService.deleteSkemaBagiHasil(id),
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('kop_skema_bagi_hasil')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+    },
     onSuccess: () => {
       toast.success('Skema bagi hasil berhasil dihapus');
       queryClient.invalidateQueries({ queryKey: ['skema-bagi-hasil'] });

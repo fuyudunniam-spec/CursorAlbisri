@@ -136,7 +136,6 @@ export class SemesterSyncService {
   ): Promise<{
     pertemuanAffected: number;
     tagihanAffected: number;
-    rancanganAffected: number;
     warnings: string[];
   }> {
     const warnings: string[] = [];
@@ -172,14 +171,6 @@ export class SemesterSyncService {
     
     const tagihanAffected = tagihanCount || 0;
     
-    // Check rancangan (jika ada semester_id reference)
-    const { count: rancanganCount } = await supabase
-      .from('rancangan_pelayanan_santri')
-      .select('*', { count: 'exact', head: true })
-      .eq('semester_id', semesterId);
-    
-    const rancanganAffected = rancanganCount || 0;
-    
     // Generate warnings
     if (pertemuanAffected > 0) {
       warnings.push(`${pertemuanAffected} pertemuan akan berada di luar rentang semester baru`);
@@ -189,14 +180,9 @@ export class SemesterSyncService {
       warnings.push(`${tagihanAffected} tagihan terhubung ke semester ini`);
     }
     
-    if (rancanganAffected > 0) {
-      warnings.push(`${rancanganAffected} rancangan pelayanan terhubung ke semester ini`);
-    }
-    
     return {
       pertemuanAffected,
       tagihanAffected,
-      rancanganAffected,
       warnings
     };
   }

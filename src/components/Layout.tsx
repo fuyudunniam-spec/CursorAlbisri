@@ -31,7 +31,8 @@ import {
   TruckIcon,
   FileBarChart,
   Calculator,
-  Target
+  Target,
+  Settings2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -131,7 +132,8 @@ const SidebarContent = () => {
         { icon: LayoutDashboard, label: 'Dashboard Keuangan', path: '/keuangan-v3/penyaluran-bantuan' },
         { icon: TrendingUp, label: 'Keuangan Umum', path: '/keuangan-v3' },
         { icon: FileText, label: 'SPP & Pembayaran Santri', path: '/tagihan-santri' },
-        { icon: PiggyBank, label: 'Tabungan Santri', path: '/tabungan-santri' }
+        { icon: PiggyBank, label: 'Tabungan Santri', path: '/tabungan-santri' },
+        { icon: Settings2, label: 'Master Data Keuangan', path: '/keuangan/master-data' }
       ]
     },
     {

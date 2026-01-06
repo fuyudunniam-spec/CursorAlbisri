@@ -242,15 +242,6 @@ const SantriSettingsPanel: React.FC<SantriSettingsPanelProps> = ({
       bgColor: 'bg-orange-100',
       items: [
         {
-          label: 'Ajukan Bantuan',
-          description: 'Buat pengajuan bantuan baru',
-          icon: Edit,
-          action: () => {
-            navigate(`/program-bantuan?action=apply&santriId=${santriId}`);
-            onClose();
-          }
-        },
-        {
           label: 'Kelola Bantuan Aktif',
           description: 'Monitor dan evaluasi bantuan',
           icon: Eye,

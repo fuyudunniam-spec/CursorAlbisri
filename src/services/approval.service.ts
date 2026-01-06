@@ -198,26 +198,7 @@ export class ApprovalService {
 
       if (santriError) throw santriError;
 
-      // If Binaan, create bantuan_aktif_santri
-      if (santri.kategori?.includes('Binaan')) {
-        const bantuanData = customBundling || (await this.calculateAutoBantuan(santri));
-        
-        const { error: bantuanError } = await supabase
-          .from('bantuan_aktif_santri')
-          .insert({
-            santri_id: santriId,
-            jenis_bantuan: santri.status_sosial,
-            komponen_bantuan: bantuanData.bundling,
-            nominal_per_bulan: bantuanData.total_nominal,
-            status: 'aktif',
-            tanggal_mulai: new Date().toISOString(),
-          });
-
-        if (bantuanError) {
-          console.error('Error creating bantuan_aktif_santri:', bantuanError);
-          // Don't throw, approval should still succeed
-        }
-      }
+      // Note: bantuan_aktif_santri logic removed - no longer using this table
     } catch (error) {
       console.error('Error approving santri:', error);
       throw error;

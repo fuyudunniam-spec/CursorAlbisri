@@ -35,6 +35,7 @@ interface Transaction {
   source_id?: string; // ID dari modul sumber (misalnya donation.id)
   referensi?: string;
   is_pengeluaran_riil?: boolean; // Baru: untuk tracking nominal vs pengeluaran riil
+  jenis_alokasi?: string; // 'overhead' = auto-post, 'langsung' atau null/undefined = manual selection
 }
 
 // Helper function to extract source from referensi or kategori
@@ -915,8 +916,19 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                                 {transaction.penerima_pembayar}
                               </div>
                             )}
-                            {/* Dropdown rincian santri untuk Bantuan Langsung Yayasan */}
-                            {transaction.kategori === 'Bantuan Langsung Yayasan' && (
+                            {/* Dropdown rincian santri untuk PENGELUARAN dengan jenis_alokasi === 'langsung' (manual selection) */}
+                            {(() => {
+                              // Hanya tampilkan link untuk PENGELUARAN dengan jenis_alokasi === 'langsung'
+                              // 'langsung' = manual selection (pilih santri tertentu) → tampilkan detail
+                              // 'overhead' = auto-post ke seluruh santri binaan mukim → tidak tampilkan (bisa dilihat di realisasi layanan)
+                              // '' atau null/undefined = tidak dialokasikan → tidak tampilkan
+                              // Pemasukan tidak memiliki alokasi santri, jadi tidak tampilkan link
+                              const isPengeluaran = transaction.jenis_transaksi === 'Pengeluaran';
+                              const jenisAlokasi = transaction.jenis_alokasi as string | undefined;
+                              const shouldShowSantriDetail = isPengeluaran && jenisAlokasi === 'langsung';
+                              
+                              return shouldShowSantriDetail;
+                            })() && (
                               <div className="mt-2">
                                 <Button
                                   variant="outline"
@@ -1149,8 +1161,19 @@ const RiwayatTransaksi: React.FC<RiwayatTransaksiProps> = ({
                             {transaction.penerima_pembayar}
                           </div>
                         )}
-                        {/* Dropdown rincian santri untuk Bantuan Langsung Yayasan */}
-                        {transaction.kategori === 'Bantuan Langsung Yayasan' && (
+                        {/* Dropdown rincian santri untuk PENGELUARAN dengan jenis_alokasi === 'langsung' (manual selection) */}
+                        {(() => {
+                          // Hanya tampilkan link untuk PENGELUARAN dengan jenis_alokasi === 'langsung'
+                          // 'langsung' = manual selection (pilih santri tertentu) → tampilkan detail
+                          // 'overhead' = auto-post ke seluruh santri binaan mukim → tidak tampilkan (bisa dilihat di realisasi layanan)
+                          // '' atau null/undefined = tidak dialokasikan → tidak tampilkan
+                          // Pemasukan tidak memiliki alokasi santri, jadi tidak tampilkan link
+                          const isPengeluaran = transaction.jenis_transaksi === 'Pengeluaran';
+                          const jenisAlokasi = transaction.jenis_alokasi as string | undefined;
+                          const shouldShowSantriDetail = isPengeluaran && jenisAlokasi === 'langsung';
+                          
+                          return shouldShowSantriDetail;
+                        })() && (
                           <div className="mt-2">
                             <Button
                               variant="outline"

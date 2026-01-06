@@ -35,7 +35,6 @@ import DokumenPage from "./pages/santri/DokumenPage";
 // Removed: ProgramSantri, ApprovalSantri (no longer used)
 // Removed: PloatingKelas - redirecting to /akademik/kelas?tab=plotting
 import TagihanSantri from "./pages/TagihanSantri";
-import ProgramSantriBiayaManager from "./components/ProgramSantriBiayaManager";
 
 // Lazy imports for module dashboards
 // Removed: DashboardSantri, DashboardKeuangan - routes redirected to canonical routes
@@ -375,11 +374,6 @@ const App = () => (
             <Route path="/santri/profile-master" element={<Navigate to="/santri/profile" replace />} />
             <Route path="/santri/profile-redesigned" element={<Navigate to="/santri/profile" replace />} />
             {/* Legacy profile routes removed - all use ProfileLayout with nested routes */}
-            <Route path="/santri/program-management/:santriId" element={
-              <Layout>
-                <ProgramSantriBiayaManager />
-              </Layout>
-            } />
             <Route path="/monitoring" element={
               <Layout>
                 <Monitoring />
